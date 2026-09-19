@@ -1,0 +1,1020 @@
+<USER_REQUEST>
+# Product Requirements Document (PRD)
+
+## Suspended Account Login, Administrator Contact & Appeal System
+
+### Product
+
+Kangra Hub – Free Tally XML
+
+### Objective
+
+Fix the current security issue where a user can still log in even after an administrator has suspended the user's account.
+
+When an administrator suspends a user account:
+
+1. The user MUST NOT be allowed to access the authenticated application.
+2. The user MAY enter their email/password on the login page, but authentication must immediately check the account status.
+3. If the account is suspended, the user must be shown a professional suspended-account UI instead of being logged into the application.
+4. The suspended user must have an option to contact the administrator and submit an appeal/review request.
+5. The submitted request must appear inside the Admin Dashboard.
+6. The administrator must be able to review the user's account and decide whether to recover the account or keep it suspended.
+7. The user must receive an email notification whenever the account is recovered or remains suspended after an appeal/review.
+8. If the account remains suspended, the user must be informed that the account is scheduled for deletion after 3 months from the suspension date, unless the administrator recovers it before deletion.
+
+---
+
+# 1. IMPORTANT IMPLEMENTATION RULE
+
+DO NOT redesign or modify unrelated parts of the application.
+
+Do not remove or change:
+
+* Existing authentication
+* Existing user dashboard
+* Existing admin dashboard functionality
+* Existing database structure unless required for this feature
+* Existing user data
+* Existing permissions
+* Existing quota system
+* Existing conversion functionality
+* Existing Tally/XML functionality
+* Existing UI components unnecessarily
+
+Implement only the functionality described in this PRD.
+
+Before making database changes, inspect the existing Supabase schema and authentication implementation and integrate this feature with the existing architecture.
+
+---
+
+# 2. ACCOUNT STATUS SYSTEM
+
+The application must have a reliable account-status check.
+
+At minimum, support:
+
+* `active`
+* `suspended`
+
+If the existing database already has an equivalent status field, reuse it instead of creating a duplicate field.
+
+Recommended additional fields if they do not already exist:
+
+```text
+account_status
+suspended_at
+suspension_reason
+suspension_delete_at
+suspension_reviewed_at
+suspension_reviewed_by
+```
+
+### Suspension date
+
+When an administrator suspends an account:
+
+```text
+suspended_at = current timestamp
+```
+
+### Scheduled deletion date
+
+Automatically calculate:
+
+```text
+suspension_delete_at = suspended_at + 3 months
+```
+
+The account must NOT automatically be deleted merely because the date has been reached unless the existing product requirements already specify an automated deletion process.
+
+Instead, the system must clearly mark/show that the account is eligible for deletion after 3 months.
+
+If automatic deletion is implemented, it must be safe and must not accidentally delete active/recovered accounts.
+
+---
+
+# 3. LOGIN SECURITY – CRITICAL
+
+This is the most important requirement.
+
+Currently, a suspended user can still log in.
+
+FIX THIS.
+
+After successful authentication, immediately check the user's account status before allowing access to any protected application route.
+
+Required flow:
+
+```text
+User enters email/password
+        ↓
+Authentication
+        ↓
+Fetch account status
+        ↓
+Is account suspended?
+        ↓
+YES
+        ↓
+Do NOT allow access to application
+        ↓
+Show Suspended Account Screen
+```
+
+A suspended user must never be able to access:
+
+* User Dashboard
+* PDF upload
+* Conversion
+* Ledger management
+* Excel export
+* Tally XML export
+* Account settings
+* Any other authenticated application route/API
+
+Do not rely only on frontend route protection.
+
+The backend/API must also validate account status for protected operations.
+
+A user must not be able to bypass suspension by:
+
+* Directly opening a dashboard URL
+* Refreshing the page
+* Using an old session
+* Using an existing access token
+* Calling protected APIs directly
+* Opening an old browser tab
+* Manipulating frontend state
+
+---
+
+# 4. SESSION HANDLING
+
+When an administrator suspends a user who is currently logged in:
+
+The user's existing session must become invalid for protected application functionality.
+
+On the next API request/session validation:
+
+```text
+account_status = suspended
+```
+
+must cause access to be denied.
+
+The frontend should redirect the user to the suspended-account screen.
+
+Do not allow a previously logged-in suspended user to continue using the application.
+
+---
+
+# 5. SUSPENDED ACCOUNT UI
+
+Create a professional, clean and trustworthy suspended-account page/modal.
+
+The UI should not look like a generic browser error.
+
+Suggested content:
+
+### Heading
+
+**Your Account Has Been Suspended**
+
+### Message
+
+> Your Kangra Hub account has been temporarily suspended due to a policy or account-related issue.
+
+If a specific suspension reason is available, show it:
+
+> **Reason:** [Administrator-provided reason]
+
+If no reason is available, do not display a fake reason.
+
+### Additional message
+
+> You currently cannot access your Kangra Hub account or its services while the suspension is active.
+
+### Deletion warning
+
+Show:
+
+> **Important:** If your account remains suspended, it may be scheduled for deletion 3 months after the suspension date. You can contact the administrator or submit an appeal for review.
+
+Show the relevant date dynamically:
+
+```text
+Scheduled deletion date: DD MMM YYYY
+```
+
+Do not hardcode a date.
+
+---
+
+# 6. CONTACT ADMINISTRATOR BUTTON
+
+The suspended-account screen must contain a prominent button:
+
+**Contact Administrator**
+
+Optional secondary button:
+
+**Submit an Appeal**
+
+If both buttons use the same workflow, a single button is acceptable:
+
+**Contact Administrator / Submit Appeal**
+
+The button must open a professional contact/appeal form.
+
+---
+
+# 7. CONTACT / APPEAL FORM
+
+The suspended user must be able to submit a message to the administrator.
+
+The form should include:
+
+### User information
+
+Automatically populate:
+
+* Name
+* Email
+* User ID
+
+These fields should not be manually editable if they are taken from the authenticated account.
+
+### Message
+
+Large textarea:
+
+**Tell us about your issue**
+
+Placeholder:
+
+> Please explain your situation, provide any relevant information, or tell us why you believe your account should be reviewed.
+
+The user can write their problem, explanation, clarification, or appeal.
+
+### Optional field
+
+Add:
+
+**Appeal Subject**
+
+Example:
+
+```text
+Request to review my suspended account
+```
+
+### Submit button
+
+**Submit Appeal**
+
+---
+
+# 8. APPEAL VALIDATION
+
+The form must validate:
+
+* Message cannot be empty
+* Message must contain a reasonable minimum number of characters
+* Prevent accidental duplicate submissions
+* Show loading state while submitting
+* Show success/error messages
+* Prevent spam/rapid repeated submissions where appropriate
+
+After successful submission:
+
+Show:
+
+### Appeal Submitted
+
+> Your request has been successfully submitted to the administrator. Your account will remain suspended while your request is being reviewed.
+
+Include:
+
+**Request ID:** `XXXXXX`
+
+if a request ID system is implemented.
+
+---
+
+# 9. DATABASE – APPEALS TABLE
+
+If an equivalent table does not already exist, create a dedicated table such as:
+
+```text
+account_appeals
+```
+
+Suggested fields:
+
+```text
+id
+user_id
+user_email
+subject
+message
+status
+admin_response
+created_at
+updated_at
+reviewed_at
+reviewed_by
+```
+
+Recommended status values:
+
+```text
+pending
+under_review
+approved
+rejected
+```
+
+If the existing database architecture uses different naming conventions, follow the existing conventions.
+
+---
+
+# 10. SUPABASE / DATABASE SECURITY
+
+This feature must follow the application's existing RLS/security architecture.
+
+Users must only be able to:
+
+* Create their own appeal
+* View their own submitted appeals, if appeal history is exposed to them
+
+Users MUST NOT be able to:
+
+* View another user's appeal
+* Modify another user's appeal
+* Change appeal status
+* Approve their own appeal
+* Recover their own account through client-side manipulation
+
+Only authorized administrators can:
+
+* View all appeals
+* Review appeals
+* Change appeal status
+* Recover accounts
+* Keep accounts suspended
+* Add administrator responses
+
+Do not solve this by exposing service-role keys in frontend code.
+
+---
+
+# 11. ADMIN DASHBOARD – APPEAL MANAGEMENT
+
+Add a dedicated section inside the existing Admin Dashboard:
+
+**Account Appeals**
+
+Show a list/table of submitted appeals.
+
+Columns should include:
+
+* User Name
+* User Email
+* Subject
+* Submitted Date
+* Status
+* Suspension Date
+* Scheduled Deletion Date
+* Last Updated
+* Actions
+
+Recommended filters:
+
+* All
+* Pending
+* Under Review
+* Approved
+* Rejected
+
+Add search by:
+
+* User email
+* User name
+* User ID
+* Appeal ID
+
+---
+
+# 12. ADMIN APPEAL DETAIL VIEW
+
+When administrator opens an appeal, show:
+
+### User Information
+
+* Name
+* Email
+* User ID
+* Account status
+* Account creation date
+* Suspension date
+* Suspension reason
+* Scheduled deletion date
+
+### Appeal Information
+
+* Subject
+* Complete user message
+* Submitted date
+* Current status
+* Previous review information
+
+### User Account Data
+
+The administrator should be able to access the user's existing account information through the existing Admin Dashboard user-management functionality.
+
+Do not expose sensitive authentication credentials/passwords.
+
+---
+
+# 13. ADMIN DECISION – RECOVER ACCOUNT
+
+Provide an administrator action:
+
+**Recover Account**
+
+Before recovery, show a confirmation dialog:
+
+> Are you sure you want to recover this account?
+
+After confirmation:
+
+```text
+account_status = active
+```
+
+Also:
+
+```text
+suspended_at = null
+suspension_reason = null
+suspension_delete_at = null
+```
+
+Preserve the user's existing account data.
+
+Do NOT delete:
+
+* User history
+* Conversion history
+* Existing files/data
+* User settings
+* Other legitimate account data
+
+unless the existing application explicitly requires it.
+
+Update the appeal:
+
+```text
+status = approved
+reviewed_at = current timestamp
+reviewed_by = current admin
+```
+
+---
+
+# 14. RECOVERY EMAIL
+
+When the administrator recovers the account, automatically send an email to the user's registered email address.
+
+Professional email content:
+
+### Subject
+
+**Your Kangra Hub Account Has Been Recovered**
+
+Suggested message:
+
+> Hello [User Name],
+>
+> We have completed the review of your Kangra Hub account.
+>
+> Your account has been successfully recovered and you can now sign in and continue using Kangra Hub services.
+>
+> Thank you for your patience while your account was under review.
+>
+> Regards,
+> Kangra Hub Administration
+
+Use the application's existing email provider/infrastructure.
+
+Do not expose API keys or SMTP credentials in frontend code.
+
+---
+
+# 15. ADMIN DECISION – KEEP ACCOUNT SUSPENDED
+
+Provide another administrator action:
+
+**Keep Suspended**
+
+Before confirmation, show:
+
+> Are you sure you want to keep this account suspended?
+
+The administrator should optionally be able to enter a review/decision note.
+
+Example:
+
+```text
+Reason / Administrator Response
+```
+
+After confirmation:
+
+```text
+account_status = suspended
+```
+
+Update:
+
+```text
+appeal.status = rejected
+reviewed_at = current timestamp
+reviewed_by = current admin
+```
+
+The scheduled deletion date should remain valid unless the administrator explicitly changes the account status according to the application's rules.
+
+---
+
+# 16. SUSPENSION EMAIL
+
+When an administrator suspends an account, send an email to the user's registered email.
+
+### Subject
+
+**Your Kangra Hub Account Has Been Suspended**
+
+Suggested content:
+
+> Hello [User Name],
+>
+> Your Kangra Hub account has been suspended following an account/policy review.
+>
+> **Reason:** [Suspension Reason]
+>
+> While your account is suspended, you will not be able to access Kangra Hub services.
+>
+> If you believe this suspension was made in error or would like to provide additional information, you can submit an appeal through the Kangra Hub login page.
+>
+> **Important:** If the account remains suspended, it may be scheduled for deletion 3 months after the suspension date.
+>
+> **Scheduled deletion date:** [Date]
+>
+> Regards,
+> Kangra Hub Administration
+
+Do not send this email if an administrator merely opens/reviews an account without actually changing its status.
+
+---
+
+# 17. APPEAL REJECTION EMAIL
+
+When an administrator reviews an appeal and decides to keep the account suspended, send a professional email.
+
+### Subject
+
+**Update Regarding Your Kangra Hub Account Appeal**
+
+Suggested content:
+
+> Hello [User Name],
+>
+> We have reviewed your request regarding your suspended Kangra Hub account.
+>
+> After reviewing the information provided, your account will remain suspended at this time.
+>
+> **Review response:** [Administrator Response]
+>
+> Your account will remain inaccessible while the suspension is active.
+>
+> **Scheduled deletion date:** [Date]
+>
+> Regards,
+> Kangra Hub Administration
+
+If the administrator does not provide a response, use a professional default message instead of displaying an empty section.
+
+---
+
+# 18. USER APPEAL HISTORY
+
+If practical within the existing UI, add an optional section to the suspended-account screen:
+
+**My Appeal**
+
+Show:
+
+* Submitted date
+* Status
+* Last updated
+* Administrator response, if available
+
+Possible status display:
+
+```text
+Pending Review
+Under Review
+Approved
+Rejected
+```
+
+If the appeal is approved and the account becomes active, redirect the user back to the normal login flow.
+
+---
+
+# 19. MULTIPLE APPEALS
+
+Prevent users from repeatedly submitting unlimited duplicate appeals.
+
+Recommended behavior:
+
+If a pending appeal already exists:
+
+> You already have an appeal under review. Please wait for the administrator's response.
+
+Allow the administrator to review the existing appeal.
+
+After an appeal is resolved, the system may allow another appeal according to reasonable application rules.
+
+Do not create unnecessary duplicate records from repeated button clicks.
+
+---
+
+# 20. ADMIN USER MANAGEMENT INTEGRATION
+
+The existing Admin Dashboard user-management page must show the account status clearly:
+
+```text
+Active
+Suspended
+```
+
+For suspended users, show:
+
+* Suspension date
+* Suspension reason
+* Scheduled deletion date
+* Appeal status
+* Last appeal date
+
+Admin actions:
+
+```text
+View User
+Suspend Account
+Recover Account
+View Appeals
+```
+
+Do not create duplicate user-management systems if one already exists.
+
+Integrate this functionality into the existing user-management system.
+
+---
+
+# 21. ACCOUNT DELETION – 3 MONTH RULE
+
+When an account is suspended:
+
+```text
+suspension_delete_at = suspension date + 3 months
+```
+
+The UI and emails must communicate this clearly.
+
+If the account is recovered before the deletion date:
+
+```text
+account_status = active
+suspension_delete_at = null
+```
+
+The account must NOT be deleted.
+
+If the account remains suspended after the deletion eligibility date, it should be clearly flagged in Admin Dashboard as:
+
+**Eligible for Deletion**
+
+Do not implement irreversible automatic deletion unless explicitly supported by the current application's data-retention requirements and administrator controls.
+
+If automatic deletion is implemented, create a safe scheduled backend job that:
+
+1. Checks account status.
+2. Checks the exact deletion date.
+3. Confirms the account is still suspended.
+4. Does NOT delete recovered accounts.
+5. Records the deletion event.
+6. Handles related user data according to the application's existing retention policy.
+
+---
+
+# 22. BACKEND API PROTECTION
+
+Every protected backend endpoint must reject suspended users.
+
+Do not only protect the frontend.
+
+Example conceptual middleware:
+
+```text
+authenticate user
+       ↓
+load account status
+       ↓
+if account_status == suspended
+       ↓
+return 403 ACCOUNT_SUSPENDED
+```
+
+Response should contain a machine-readable code:
+
+```json
+{
+  "error": "ACCOUNT_SUSPENDED",
+  "message": "Your account has been suspended."
+}
+```
+
+The frontend must detect this response and redirect/show the suspended-account UI.
+
+---
+
+# 23. SECURITY REQUIREMENTS
+
+Verify all of the following:
+
+* Suspended users cannot access protected APIs.
+* Suspended users cannot access dashboard routes.
+* Suspended users cannot upload PDFs.
+* Suspended users cannot generate Excel files.
+* Suspended users cannot generate Tally XML.
+* Suspended users cannot manipulate account status from browser DevTools.
+* Suspended users cannot approve their own appeal.
+* Suspended users cannot modify appeal status.
+* Suspended users cannot access another user's appeal.
+* Admin-only actions require proper admin authorization.
+* Service-role/database admin credentials must never be exposed to the frontend.
+* Existing RLS policies must remain secure.
+* Existing authentication must continue working for active users.
+
+---
+
+# 24. UI/UX REQUIREMENTS
+
+The suspended-account experience should be professional and consistent with the existing Kangra Hub design system.
+
+Use:
+
+* Clean card-based layout
+* Clear warning/status icon
+* Good spacing
+* Responsive design
+* Mobile-friendly form
+* Accessible buttons
+* Proper loading states
+* Success/error notifications
+* Clear status badges
+* Confirmation dialogs for admin actions
+
+Do not make the screen look aggressive or punitive.
+
+The wording should be professional, neutral and helpful.
+
+---
+
+# 25. ADMIN WORKFLOW
+
+Final expected workflow:
+
+```text
+Admin suspends user
+        ↓
+Account status = suspended
+        ↓
+Suspension date recorded
+        ↓
+Deletion date = +3 months
+        ↓
+Suspension email sent
+        ↓
+User attempts login
+        ↓
+Authentication succeeds
+        ↓
+Account status checked
+        ↓
+Account is suspended
+        ↓
+Access denied
+        ↓
+Suspended Account UI shown
+        ↓
+User clicks "Contact Administrator / Submit Appeal"
+        ↓
+User submits message
+        ↓
+Appeal stored securely
+        ↓
+Appeal appears in Admin Dashboard
+        ↓
+Admin reviews account + appeal
+        ↓
+       / \
+      /   \
+Recover   Keep Suspended
+   ↓          ↓
+Active     Suspended
+   ↓          ↓
+Recovery   Rejection/
+Email      Suspension Email
+```
+
+---
+
+# 26. TESTING REQUIREMENTS
+
+Before considering this feature complete, test the following scenarios.
+
+### Test 1 – Active user
+
+```text
+Active user → Login → Dashboard
+```
+
+Expected: Works normally.
+
+### Test 2 – Suspended user
+
+```text
+Suspended user → Login
+```
+
+Expected:
+
+* Login access denied
+* Dashboard inaccessible
+* Suspended-account UI shown
+
+### Test 3 – Direct URL
+
+```text
+Suspended user → /dashboard
+```
+
+Expected:
+
+* User cannot access dashboard
+* Redirect to suspended-account screen
+
+### Test 4 – API bypass
+
+Attempt protected API requests using a suspended user's session/token.
+
+Expected:
+
+```text
+403 ACCOUNT_SUSPENDED
+```
+
+### Test 5 – Appeal
+
+Suspended user submits appeal.
+
+Expected:
+
+* Appeal stored
+* Confirmation displayed
+* Appeal appears in Admin Dashboard
+
+### Test 6 – Admin recovery
+
+Admin approves appeal/recover account.
+
+Expected:
+
+* User status becomes active
+* Appeal becomes approved
+* Suspension fields cleared appropriately
+* Recovery email sent
+* User can log in normally
+
+### Test 7 – Admin rejection
+
+Admin keeps account suspended.
+
+Expected:
+
+* User remains suspended
+* Appeal becomes rejected
+* Administrator response is stored
+* Suspension/review email sent
+* Scheduled deletion date remains visible
+
+### Test 8 – Existing session
+
+User logs in while active.
+
+Admin then suspends the user.
+
+Expected:
+
+* Existing session cannot continue using protected application features.
+* Next protected API/session check detects suspension.
+* User is redirected to suspended-account UI.
+
+### Test 9 – Recovered account
+
+Admin recovers a previously suspended account.
+
+Expected:
+
+* User can log in normally
+* Old suspension warning is not shown
+* Account is no longer marked for deletion
+
+### Test 10 – Duplicate appeals
+
+User rapidly clicks Submit multiple times.
+
+Expected:
+
+* No duplicate appeals are created.
+
+---
+
+# 27. ACCEPTANCE CRITERIA
+
+This feature is considered complete only when:
+
+* [ ] Suspended users cannot log into/use the protected application.
+* [ ] Suspended status is checked server-side.
+* [ ] Existing sessions are blocked after suspension.
+* [ ] Professional suspended-account UI is implemented.
+* [ ] Suspension reason is displayed when available.
+* [ ] 3-month deletion date is calculated dynamically.
+* [ ] Contact Administrator button exists.
+* [ ] User can submit an appeal/message.
+* [ ] Appeal is securely stored.
+* [ ] Appeal appears in Admin Dashboard.
+* [ ] Admin can review the user's account and appeal.
+* [ ] Admin can recover the account.
+* [ ] Admin can keep the account suspended.
+* [ ] Recovery email is sent automatically.
+* [ ] Suspension/rejection email is sent automatically.
+* [ ] Email contains appropriate account/deletion information.
+* [ ] User cannot manipulate their own account status.
+* [ ] RLS/security policies prevent unauthorized access.
+* [ ] Existing functionality remains unaffected.
+* [ ] No admin credentials/secrets are exposed.
+* [ ] All listed test scenarios pass.
+
+---
+
+# 28. FINAL IMPLEMENTATION INSTRUCTION
+
+First inspect the existing project architecture, authentication flow, Supabase schema, RLS policies, Admin Dashboard and email infrastructure.
+
+Then implement this PRD using the existing architecture.
+
+Do NOT rebuild the authentication system from scratch.
+
+Do NOT create duplicate tables, duplicate user-management systems, or duplicate authentication logic if equivalent functionality already exists.
+
+Reuse existing components and database fields wherever possible.
+
+If database changes are required, provide and execute the required Supabase SQL migration safely.
+
+After implementation:
+
+1. Run database migrations.
+2. Verify RLS policies.
+3. Verify backend authorization.
+4. Verify frontend route protection.
+5. Verify email notifications.
+6. Test active users.
+7. Test suspended users.
+8. Test appeal submission.
+9. Test admin recovery.
+10. Test admin rejection.
+11. Test existing-session suspension.
+12. Fix any errors found during testing.
+
+Do not modify unrelated application functionality.
+
+The final result must be production-ready, secure, responsive and integrated with the existing Kangra Hub application.
+
+</USER_REQUEST>
+<ADDITIONAL_METADATA>
+The current local time is: 2026-09-19T10:52:44+05:30.
+</ADDITIONAL_METADATA>

@@ -1,0 +1,55 @@
+# Environment / secrets
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.venv/
+venv/
+ENV/
+env/
+
+# Node / Frontend
+node_modules/
+.next/
+out/
+dist/
+build/
+coverage/
+.npm/
+*.tsbuildinfo
+
+# Logs
+*.log
+logs/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Temporary files
+*.tmp
+*.temp
+*.swp
+*.swo
+# Local database
+backend/data/
+
+# Temporary processing files
+backend/temp_processing/
+
+# Uploaded user/payment files
+backend/uploads/
+
+# Local test artifacts
+.pytest_cache/
