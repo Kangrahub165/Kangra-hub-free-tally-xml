@@ -26,7 +26,9 @@ class ExtractedDocument:
         is_digital: bool = True,
         file_path: Optional[str] = None,
         password: Optional[str] = None,
-        total_file_pages: Optional[int] = None
+        total_file_pages: Optional[int] = None,
+        start_page: int = 1,
+        max_pages: Optional[int] = None
     ):
         self.pages = pages
         self.is_digital = is_digital
@@ -36,6 +38,9 @@ class ExtractedDocument:
         self.first_page_text = pages[0].text if pages else ""
         self.file_path = file_path
         self.password = password
+        self.start_page = start_page
+        self.max_pages = max_pages
+        self.page_numbers = [p.page_number for p in pages]
 
 def extract_pdf_data(
     file_path: str,
@@ -117,7 +122,9 @@ def extract_pdf_data(
             is_digital=is_digital,
             file_path=file_path,
             password=password,
-            total_file_pages=total_file_pages
+            total_file_pages=total_file_pages,
+            start_page=start_page,
+            max_pages=max_pages
         )
 
     except InvalidPDFException:
@@ -131,16 +138,14 @@ def extract_pdf_header_sample(
     max_pages: int = 3
 ) -> ExtractedDocument:
     """
-    Quickly extracts first few pages and the last page for rapid bank detection
-    without reading full 100+ page statements into memory.
+    Quickly extracts first few pages strictly for rapid bank detection
+    without reading full statements or touching unauthorized pages.
     """
     try:
         pages: List[ExtractedPage] = []
         with pdfplumber.open(file_path, password=password or None) as pdf:
             total = len(pdf.pages)
             indices_to_read = list(range(min(max_pages, total)))
-            if total > max_pages:
-                indices_to_read.append(total - 1)
             for idx in sorted(set(indices_to_read)):
                 page = pdf.pages[idx]
                 text = page.extract_text(layout=False) or ""
@@ -151,7 +156,10 @@ def extract_pdf_header_sample(
             pages=pages,
             is_digital=True,
             file_path=file_path,
-            password=password
+            password=password,
+            total_file_pages=total,
+            start_page=1,
+            max_pages=max_pages
         )
     except Exception:
-        return extract_pdf_data(file_path, password=password, extract_tables=False)
+        return extract_pdf_data(file_path, password=password, extract_tables=False, max_pages=max_pages, start_page=1)

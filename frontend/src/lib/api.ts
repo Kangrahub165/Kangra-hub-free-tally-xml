@@ -114,6 +114,7 @@ export interface PageDiagnosticSummary {
 export interface ConversionJobSummary {
   id: string;
   user_id: string;
+  user_email?: string;
   file_name: string;
   bank_name: string;
   statement_format: string;
@@ -121,6 +122,8 @@ export interface ConversionJobSummary {
   total_pdf_pages?: number;
   pages_processed?: number;
   pages_skipped?: number;
+  pages_pending?: number;
+  page_statuses?: Record<string, string>;
   free_quota_used?: number;
   additional_quota_used?: number;
   is_partial_conversion?: boolean;
@@ -1552,6 +1555,23 @@ export async function processRemainingPages(jobId: string): Promise<ConversionJo
     method: 'POST',
   });
 }
+
+export async function getRecentActiveConversion(): Promise<ConversionJobSummary | null> {
+  try {
+    return await apiFetch<ConversionJobSummary | null>('/conversions/active/recent');
+  } catch {
+    return null;
+  }
+}
+
+export async function getMyPaymentRequests(): Promise<PaymentRequest[]> {
+  try {
+    return await apiFetch<PaymentRequest[]>('/payments/requests/me');
+  } catch {
+    return [];
+  }
+}
+
 
 
 

@@ -777,6 +777,12 @@ def test_multi_bank_pipeline_pnb_statement():
     """
     pnb_bytes = create_synthetic_pnb_pdf()
     _IN_MEMORY_DAILY_USAGE.clear()
+    IN_MEMORY_JOBS.clear()
+    from app.core import db
+    today = get_kolkata_today()
+    for uid in ["test-user-id", "user@example.com"]:
+        db.reset_daily_usage(uid, today)
+        db.set_additional_pages(uid, 0)
     upload_res = client.post(
         "/api/conversions/upload",
         files={"file": ("pnb_pipeline.pdf", pnb_bytes, "application/pdf")},

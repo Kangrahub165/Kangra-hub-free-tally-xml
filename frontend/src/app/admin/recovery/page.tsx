@@ -261,7 +261,7 @@ function RecoveryConsoleContent() {
       case 'VERIFIED':
         return <span className="inline-flex items-center gap-1 text-[11px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200"><Check className="w-3 h-3 text-emerald-600" /> {stepStatus}</span>;
       case 'FAILED':
-        return <span className="inline-flex items-center gap-1 text-[11px] font-bold text-red-700 bg-red-50 px-2 py-0.5 rounded-full border border-red-200"><X className="w-3 h-3 text-red-600" /> FAILED</span>;
+        return <span className="inline-flex items-center gap-1 text-[11px] font-bold text-red-700 bg-rose-50 px-2 py-0.5 rounded-full border border-red-200"><X className="w-3 h-3 text-rose-600" /> FAILED</span>;
       case 'CODE_SENT':
         return <span className="inline-flex items-center gap-1 text-[11px] font-bold text-brand-700 bg-brand-50 px-2 py-0.5 rounded-full border border-brand-200"><Mail className="w-3 h-3 text-brand-600" /> CODE SENT</span>;
       case 'ADDITIONAL_VERIFICATION_REQUIRED':
@@ -370,7 +370,7 @@ function RecoveryConsoleContent() {
             <p className="text-[11px] text-slate-400">All registered users are verified and operating normally.</p>
           </div>
         ) : (
-          <Table>
+          <div className="overflow-x-auto">\n<Table>
             <TableHeader>
               <tr>
                 <TableHead>Request Reference</TableHead>
@@ -427,7 +427,7 @@ function RecoveryConsoleContent() {
                 </TableRow>
               ))}
             </TableBody>
-          </Table>
+          </Table>\n</div>
         )}
       </Card>
 
@@ -476,7 +476,7 @@ function RecoveryConsoleContent() {
                 </div>
               </div>
               {selectedReq.identity_verification_info && (
-                <div className="p-2.5 bg-blue-50/70 border border-blue-100 rounded-lg text-xs text-blue-900 mt-2">
+                <div className="p-2.5 bg-brand-50/70 border border-blue-100 rounded-lg text-xs text-blue-900 mt-2">
                   <span className="font-bold">Applicant Note:</span> {selectedReq.identity_verification_info}
                 </div>
               )}
@@ -527,7 +527,7 @@ function RecoveryConsoleContent() {
                       value="FAILED"
                       checked={step1Decision === 'FAILED'}
                       onChange={() => setStep1Decision('FAILED')}
-                      className="text-red-600 focus:ring-red-500"
+                      className="text-rose-600 focus:ring-red-500"
                     />
                     <span className="text-red-800">Fail Step 1 (Reject Ownership)</span>
                   </label>

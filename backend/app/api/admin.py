@@ -1155,7 +1155,7 @@ async def admin_reject_appeal(
 async def grant_unlimited_access(user_id: str, admin: CurrentUser = Depends(require_admin)):
     """Grants unlimited conversion access to a specific user."""
     from app.core.user_store import register_user, REGISTERED_USERS
-    from app.core.db import db
+    import app.core.db as db
     user = MANAGED_PLATFORM_USERS.get(user_id)
     if not user:
         user = CurrentUser(id=user_id, email=f"{user_id}@example.com", is_unlimited=True)
@@ -1176,7 +1176,7 @@ async def grant_unlimited_access(user_id: str, admin: CurrentUser = Depends(requ
 async def revoke_unlimited_access(user_id: str, admin: CurrentUser = Depends(require_admin)):
     """Revokes unlimited conversion access for a specific user."""
     from app.core.user_store import REGISTERED_USERS
-    from app.core.db import db
+    import app.core.db as db
     user = MANAGED_PLATFORM_USERS.get(user_id)
     if user:
         user.is_unlimited = False
@@ -1288,7 +1288,7 @@ async def toggle_user_suspension(user_id: str, admin: CurrentUser = Depends(requ
 async def reset_user_daily_usage(user_id: str, admin: CurrentUser = Depends(require_admin)):
     """Resets today's page usage counter for a specific user."""
     from app.api.usage import _IN_MEMORY_DAILY_USAGE, get_kolkata_today
-    from app.core.db import db
+    import app.core.db as db
     today = get_kolkata_today()
     _IN_MEMORY_DAILY_USAGE[f"{user_id}:{today}"] = 0
     for k in list(_IN_MEMORY_DAILY_USAGE.keys()):

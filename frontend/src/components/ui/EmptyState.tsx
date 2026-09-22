@@ -16,8 +16,9 @@ export function EmptyState({
   className = '',
 }: EmptyStateProps) {
   return (
-    <div className={`p-12 sm:p-16 text-center space-y-3 max-w-md mx-auto ${className}`}>
-      <div className="w-12 h-12 rounded-2xl bg-slate-100 text-slate-500 flex items-center justify-center mx-auto mb-2 shadow-xs">
+    <div className={`p-12 sm:p-16 text-center space-y-3 max-w-md mx-auto relative ${className}`}>
+      <div className="absolute inset-0 bg-slate-50/50 bg-[radial-gradient(#e2e8f0_1px,transparent_1px)] [background-size:16px_16px] rounded-3xl -z-10" />
+      <div className="w-14 h-14 rounded-2xl bg-white border border-slate-100 text-brand-600 flex items-center justify-center mx-auto mb-4 shadow-card">
         {icon}
       </div>
       <h3 className="text-sm font-bold text-slate-800 tracking-tight">{title}</h3>

@@ -93,14 +93,21 @@ async def get_current_user(
                     "suspension_delete_at": delete_at
                 }
             )
-        # Ensure session user exists in persistent store
+        # Ensure session user exists in persistent store with authoritative SQLite role & quota
+        from app.core import db
+        db_u = db.get_user_by_id_or_email(user_id) or db.get_user_by_id_or_email(email)
+        role = (db_u.get("role") if db_u else None) or active_sess.get("role", "USER")
+        is_admin_user = role in ("ADMIN", "SUPER_ADMIN")
+        # Standard user is ONLY unlimited if explicitly set in SQLite by Admin!
+        is_unlim = is_admin_user or (bool(db_u.get("is_unlimited")) if db_u else bool(active_sess.get("is_unlimited", False)))
+
         try:
             from app.core.user_store import register_user
             register_user(
                 user_id=user_id,
                 email=email,
-                role=active_sess.get("role", "USER"),
-                is_unlimited=active_sess.get("is_unlimited", False),
+                role=role,
+                is_unlimited=is_unlim,
                 full_name=active_sess.get("full_name") or email.split("@")[0].capitalize(),
                 account_status="ACTIVE"
             )
@@ -110,8 +117,8 @@ async def get_current_user(
         return CurrentUser(
             id=user_id,
             email=email,
-            role=active_sess.get("role", "USER"),
-            is_unlimited=active_sess.get("is_unlimited", False),
+            role=role,
+            is_unlimited=is_unlim,
             full_name=active_sess.get("full_name") or email.split("@")[0].capitalize()
         )
 
@@ -321,12 +328,16 @@ async def get_current_user(
         role = db_role or (u.get("user_metadata") or {}).get("role", "USER")
         is_admin_user = role in ("ADMIN", "SUPER_ADMIN")
 
+        from app.core import db
+        db_u = db.get_user_by_id_or_email(user_id) or db.get_user_by_id_or_email(u.get("email") or "")
+
         # 4. Query public.user_access using authenticated user ID (auth.users.id)
         is_unlimited = False
         ua_data = SupabaseService.query_user_access(user_id, user_token=raw_token)
         if ua_data:
             is_unlimited = ua_data.get("unlimited") is True or ua_data.get("access_type") == "UNLIMITED"
 
+        effective_unlimited = is_admin_user or (bool(db_u.get("is_unlimited")) if db_u else is_unlimited)
         meta = u.get("user_metadata") or {}
 
         try:
@@ -337,7 +348,7 @@ async def get_current_user(
                 full_name=meta.get("full_name") or "User",
                 mobile_number=meta.get("mobile_number") or "",
                 role=role,
-                is_unlimited=is_unlimited or is_admin_user,
+                is_unlimited=effective_unlimited,
                 account_status="ACTIVE",
                 email_verified=True,
                 mobile_verified=bool(meta.get("mobile_number"))
@@ -349,7 +360,7 @@ async def get_current_user(
             id=user_id,
             email=u.get("email") or "",
             role=role,
-            is_unlimited=is_unlimited or is_admin_user,
+            is_unlimited=effective_unlimited,
             full_name=meta.get("full_name") or "User",
             mobile_number=meta.get("mobile_number") or ""
         )

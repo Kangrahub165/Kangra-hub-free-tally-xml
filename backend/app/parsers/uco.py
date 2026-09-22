@@ -65,7 +65,13 @@ class UCOBankParser(BaseStatementParser):
         # 1. Try structured table extraction first
         if doc.file_path:
             try:
-                table_rows = extract_structured_table_rows(doc.file_path, doc.password)
+                table_rows = extract_structured_table_rows(
+                    doc.file_path,
+                    doc.password,
+                    start_page=getattr(doc, "start_page", 1),
+                    max_pages=getattr(doc, "max_pages", None),
+                    allowed_page_numbers=getattr(doc, "page_numbers", None)
+                )
                 if table_rows:
                     for r in table_rows:
                         tx_date = normalize_date(r.date_str)

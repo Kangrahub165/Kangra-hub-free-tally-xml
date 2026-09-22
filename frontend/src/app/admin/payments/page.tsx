@@ -178,13 +178,13 @@ export default function AdminPaymentsPage() {
 
         <div className="flex items-center gap-3">
           <a
-            href="https://wa.me/919418250639"
+            href="https://wa.me/919805987622"
             target="_blank"
             rel="noopener noreferrer"
             className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 transition-colors"
           >
             <MessageCircle className="w-4 h-4" />
-            Support WhatsApp: +91 9418250639
+            Support WhatsApp: +91 9805987622
           </a>
           <Button
             variant="outline"
@@ -246,10 +246,10 @@ export default function AdminPaymentsPage() {
           </div>
         </Card>
 
-        <Card className="p-4 border-blue-200 bg-blue-50/30">
+        <Card className="p-4 border-blue-200 bg-brand-50/30">
           <div className="flex items-center justify-between">
             <span className="text-[11px] font-bold text-blue-800 uppercase tracking-wider">Pages Credited</span>
-            <CreditCard className="w-4 h-4 text-blue-600" />
+            <CreditCard className="w-4 h-4 text-brand-600" />
           </div>
           <div className="mt-2 text-2xl font-black text-blue-900 font-mono">
             {totalPagesGranted.toLocaleString()}
@@ -268,24 +268,30 @@ export default function AdminPaymentsPage() {
       </div>
 
       {/* Filter and Search Bar */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-4 rounded-2xl border border-slate-200 shadow-xs">
-        <div className="flex items-center gap-2 overflow-x-auto pb-1 sm:pb-0">
-          {(['ALL', 'PENDING', 'APPROVED', 'REJECTED'] as const).map((tab) => (
-            <button
-              key={tab}
-              onClick={() => setFilterTab(tab)}
-              className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
-                filterTab === tab
-                  ? 'bg-slate-900 text-white shadow-xs'
-                  : 'bg-slate-100 hover:bg-slate-200 text-slate-700'
-              }`}
-            >
-              {tab === 'ALL' && `All (${requests.length})`}
-              {tab === 'PENDING' && `Pending (${pendingCount})`}
-              {tab === 'APPROVED' && `Approved (${approvedCount})`}
-              {tab === 'REJECTED' && `Rejected (${rejectedCount})`}
-            </button>
-          ))}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-4 rounded-2xl border border-slate-200 shadow-sm">
+        <div className="flex items-center gap-2 overflow-x-auto pb-1 sm:pb-0 scrollbar-hide">
+          {(['ALL', 'PENDING', 'APPROVED', 'REJECTED'] as const).map((tab) => {
+            const count = tab === 'ALL' ? requests.length : tab === 'PENDING' ? pendingCount : tab === 'APPROVED' ? approvedCount : rejectedCount;
+            return (
+              <button
+                key={tab}
+                onClick={() => setFilterTab(tab)}
+                className={`relative flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap overflow-hidden ${
+                  filterTab === tab
+                    ? 'bg-navy-900 text-white shadow-md scale-100'
+                    : 'bg-slate-50 hover:bg-slate-100 text-slate-600 border border-slate-200 scale-95 hover:scale-100'
+                }`}
+              >
+                {filterTab === tab && <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/10 to-transparent -translate-x-full animate-shimmer" />}
+                <span className="capitalize">{tab.toLowerCase()}</span>
+                <span className={`px-2 py-0.5 rounded-full text-[10px] font-black ${
+                  filterTab === tab ? 'bg-white/20 text-white' : 'bg-slate-200 text-slate-700'
+                }`}>
+                  {count}
+                </span>
+              </button>
+            );
+          })}
         </div>
 
         <div className="w-full sm:w-72 relative">
@@ -390,7 +396,7 @@ export default function AdminPaymentsPage() {
                         {req.screenshot_url ? (
                           <button
                             onClick={() => setViewingScreenshotUrl(req.screenshot_url!)}
-                            className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-blue-50 hover:bg-blue-100 text-blue-700 font-bold text-[11px] border border-blue-200 transition-colors"
+                            className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-brand-50 hover:bg-blue-100 text-blue-700 font-bold text-[11px] border border-blue-200 transition-colors"
                           >
                             <FileImage className="w-3.5 h-3.5" />
                             View Proof
@@ -415,19 +421,19 @@ export default function AdminPaymentsPage() {
                       {/* Status */}
                       <td className="py-3.5 px-4 whitespace-nowrap">
                         {req.status === 'PENDING' && (
-                          <Badge variant="warning" size="sm">
-                            PENDING
-                          </Badge>
+                          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wider bg-amber-50 text-amber-600 border border-amber-200/60 shadow-xs">
+                            <Clock className="w-3 h-3" /> PENDING
+                          </span>
                         )}
                         {req.status === 'APPROVED' && (
-                          <Badge variant="success" size="sm">
-                            APPROVED
-                          </Badge>
+                          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wider bg-emerald-50 text-emerald-600 border border-emerald-200/60 shadow-xs">
+                            <CheckCircle2 className="w-3 h-3" /> APPROVED
+                          </span>
                         )}
                         {req.status === 'REJECTED' && (
-                          <Badge variant="danger" size="sm">
-                            REJECTED
-                          </Badge>
+                          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wider bg-rose-50 text-rose-600 border border-rose-200/60 shadow-xs">
+                            <XCircle className="w-3 h-3" /> REJECTED
+                          </span>
                         )}
                       </td>
 
@@ -511,25 +517,26 @@ export default function AdminPaymentsPage() {
         title="Approve Page Purchase & Credit Balance"
         description={`Approving request #${approveTarget?.id.substring(0, 8)} for ${approveTarget?.user_email}.`}
         maxWidth="md"
+        className="max-h-[90vh] overflow-y-auto"
       >
-        <div className="space-y-4">
-          <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 text-xs space-y-2">
-            <div className="flex justify-between">
-              <span className="text-slate-500">Requested Pages:</span>
-              <strong className="text-slate-900">{approveTarget?.requested_pages} pages</strong>
+        <div className="space-y-5 animate-slideUp">
+          <div className="bg-gradient-to-br from-emerald-50 to-white p-5 rounded-2xl border border-emerald-100 shadow-sm space-y-3">
+            <div className="flex justify-between items-center">
+              <span className="text-slate-500 font-semibold text-xs uppercase tracking-wider">Requested Pages</span>
+              <strong className="text-navy-900 text-lg font-black">{approveTarget?.requested_pages}</strong>
             </div>
-            <div className="flex justify-between">
-              <span className="text-slate-500">Claimed Amount:</span>
-              <strong className="text-emerald-700 font-bold font-mono">₹{((approveTarget?.amount_paid ?? approveTarget?.amount_inr ?? 0)).toFixed(2)}</strong>
+            <div className="flex justify-between items-center">
+              <span className="text-slate-500 font-semibold text-xs uppercase tracking-wider">Claimed Amount</span>
+              <strong className="text-emerald-600 font-black font-mono text-xl">₹{((approveTarget?.amount_paid ?? approveTarget?.amount_inr ?? 0)).toFixed(2)}</strong>
             </div>
-            <div className="flex justify-between">
-              <span className="text-slate-500">User Remarks:</span>
-              <span className="text-slate-700">{approveTarget?.notes || approveTarget?.user_notes || 'None'}</span>
+            <div className="flex flex-col gap-1 pt-2 border-t border-emerald-100/50">
+              <span className="text-slate-400 font-semibold text-[10px] uppercase tracking-wider">User Remarks</span>
+              <span className="text-slate-700 text-sm font-medium">{approveTarget?.notes || approveTarget?.user_notes || 'None'}</span>
             </div>
           </div>
 
-          <div>
-            <label className="block text-xs font-bold text-slate-700 mb-1">
+          <div className="space-y-2">
+            <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider">
               Granted Pages to Credit <span className="text-rose-500">*</span>
             </label>
             <Input
@@ -537,30 +544,32 @@ export default function AdminPaymentsPage() {
               min="1"
               value={grantedPagesInput}
               onChange={(e) => setGrantedPagesInput(parseInt(e.target.value) || 0)}
+              className="text-lg font-bold h-12"
             />
-            <p className="text-[11px] text-slate-400 mt-1">
+            <p className="text-[11px] text-slate-500 font-medium">
               Pages will be instantly credited to the user's permanent purchased balance.
             </p>
           </div>
 
-          <div>
-            <label className="block text-xs font-bold text-slate-700 mb-1">
-              Admin Notes (Optional)
+          <div className="space-y-2">
+            <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider">
+              Admin Notes <span className="text-slate-400 font-normal">(Optional)</span>
             </label>
             <Input
               type="text"
               value={approveNotesInput}
               onChange={(e) => setApproveNotesInput(e.target.value)}
               placeholder="e.g. Verified via UPI transaction 4123..."
+              className="h-11"
             />
           </div>
 
-          <div className="flex gap-3 pt-2">
+          <div className="flex gap-3 pt-4 border-t border-slate-100">
             <Button
               variant="outline"
               size="md"
               onClick={() => setApproveTarget(null)}
-              className="w-1/3"
+              className="w-1/3 hover:bg-slate-100"
             >
               Cancel
             </Button>
@@ -570,8 +579,8 @@ export default function AdminPaymentsPage() {
               onClick={handleConfirmApprove}
               loading={actionLoading}
               disabled={actionLoading || grantedPagesInput <= 0}
-              className="w-2/3 bg-emerald-600 hover:bg-emerald-700 text-white font-bold"
-              icon={<Check className="w-4 h-4" />}
+              className="w-2/3 bg-gradient-to-r from-emerald-500 to-emerald-600 hover:from-emerald-600 hover:to-emerald-700 text-white font-bold shadow-glow-brand"
+              icon={<Check className="w-5 h-5" />}
             >
               Confirm & Credit {grantedPagesInput} Pages
             </Button>
@@ -586,10 +595,11 @@ export default function AdminPaymentsPage() {
         title="Reject Page Purchase Request"
         description={`Rejecting request #${rejectTarget?.id.substring(0, 8)}.`}
         maxWidth="md"
+        className="max-h-[90vh] overflow-y-auto"
       >
-        <div className="space-y-4">
-          <div>
-            <label className="block text-xs font-bold text-slate-700 mb-1">
+        <div className="space-y-5 animate-slideDown">
+          <div className="space-y-2">
+            <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider">
               Rejection Reason <span className="text-rose-500">*</span>
             </label>
             <Input
@@ -597,19 +607,20 @@ export default function AdminPaymentsPage() {
               value={rejectReasonInput}
               onChange={(e) => setRejectReasonInput(e.target.value)}
               placeholder="e.g. Amount not received in bank statement..."
+              className="h-11 border-rose-200 focus:ring-rose-500/20 focus:border-rose-500"
               autoFocus
             />
-            <p className="text-[11px] text-slate-400 mt-1">
+            <p className="text-[11px] text-slate-500 font-medium">
               This reason will be visible to the user in their notification feed.
             </p>
           </div>
 
-          <div className="flex gap-3 pt-2">
+          <div className="flex gap-3 pt-4 border-t border-slate-100">
             <Button
               variant="outline"
               size="md"
               onClick={() => setRejectTarget(null)}
-              className="w-1/3"
+              className="w-1/3 hover:bg-slate-100"
             >
               Cancel
             </Button>
@@ -619,8 +630,8 @@ export default function AdminPaymentsPage() {
               onClick={handleConfirmReject}
               loading={actionLoading}
               disabled={actionLoading || !rejectReasonInput.trim()}
-              className="w-2/3 font-bold"
-              icon={<X className="w-4 h-4" />}
+              className="w-2/3 font-bold shadow-glow-brand"
+              icon={<X className="w-5 h-5" />}
             >
               Confirm Rejection
             </Button>

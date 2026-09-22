@@ -23,9 +23,32 @@ export default function ForgotPasswordPage() {
   };
 
   return (
-    <div className="min-h-[calc(100vh-5rem)] flex items-center justify-center p-4 sm:p-6 bg-slate-50">
-      <div className="max-w-md w-full bg-white p-7 sm:p-9 rounded-3xl border border-slate-200 shadow-elevated">
+    <div className="min-h-[calc(100vh-5rem)] flex items-center justify-center p-4 sm:p-6 lg:p-10 bg-navy-50 gradient-surface">
+      <div className="w-full max-w-4xl grid grid-cols-1 lg:grid-cols-2 bg-white glass-card rounded-3xl border border-navy-200/60 shadow-modal overflow-hidden animate-slideUp">
         
+        {/* Left Value Prop Hero */}
+        <div className="hidden lg:flex gradient-hero p-8 flex-col justify-between text-white relative">
+          <div className="absolute inset-0 bg-[radial-gradient(#38bdf810_1px,transparent_1px)] bg-[size:16px_16px] pointer-events-none" />
+          <div className="relative z-10 space-y-6">
+            <Link href="/" className="flex items-center gap-3 inline-flex">
+              <div className="relative w-9 h-9 flex-shrink-0">
+                <Image src="/logo.webp" alt="Kangra Hub" width={36} height={36} className="rounded-xl shadow-glow-brand" />
+              </div>
+              <div className="flex flex-col">
+                <span className="font-extrabold text-base tracking-tight text-white leading-tight">Kangra Hub</span>
+                <span className="text-[10px] font-bold text-brand-300 tracking-wider uppercase">Free Tally XML</span>
+              </div>
+            </Link>
+            <div className="space-y-3 pt-4">
+              <h2 className="text-xl font-extrabold text-white tracking-tight leading-snug">Secure Account Recovery</h2>
+              <p className="text-xs text-navy-300 leading-relaxed">Follow the steps to regain access to your Kangra Hub account.</p>
+            </div>
+          </div>
+        </div>
+
+        {/* Right Form Column */}
+        <div className="p-6 sm:p-10 flex flex-col justify-center">
+          <div className="max-w-sm w-full mx-auto">
         {/* Brand Icon Header */}
         <div className="text-center mb-8">
           <Link href="/" className="inline-block mb-3.5 focus:outline-none">
@@ -34,26 +57,26 @@ export default function ForgotPasswordPage() {
               alt="Kangra Hub"
               width={48}
               height={48}
-              className="mx-auto rounded-2xl shadow-xs"
+              className="mx-auto rounded-2xl shadow-glow-brand"
             />
           </Link>
-          <h1 className="text-2xl font-black text-slate-900 tracking-tight">
+          <h1 className="text-2xl font-black text-navy-900 tracking-tight">
             Reset Your Password
           </h1>
-          <p className="text-xs text-slate-500 mt-1">
+          <p className="text-xs text-navy-500 mt-1">
             We will email you instructions to safely reset your credentials
           </p>
         </div>
 
         {submitted ? (
           <div className="text-center py-6 space-y-4">
-            <div className="w-12 h-12 rounded-2xl bg-emerald-100 text-emerald-600 flex items-center justify-center mx-auto shadow-xs">
+            <div className="w-12 h-12 rounded-2xl bg-emerald-100 text-emerald-600 flex items-center justify-center mx-auto shadow-glow-brand">
               <CheckCircle2 className="w-6 h-6" />
             </div>
             <div className="space-y-1">
-              <h3 className="text-sm font-bold text-slate-900">Email Dispatched</h3>
-              <p className="text-xs text-slate-600 leading-relaxed max-w-xs mx-auto">
-                If an account is associated with <strong className="text-slate-900">{email}</strong>, you will receive a secure password recovery link shortly.
+              <h3 className="text-sm font-bold text-navy-900">Email Dispatched</h3>
+              <p className="text-xs text-navy-600 leading-relaxed max-w-xs mx-auto">
+                If an account is associated with <strong className="text-navy-900">{email}</strong>, you will receive a secure password recovery link shortly.
               </p>
             </div>
             <div className="pt-2">
@@ -87,10 +110,10 @@ export default function ForgotPasswordPage() {
               Send Reset Link
             </Button>
 
-            <div className="text-center pt-3 border-t border-slate-100 flex flex-col gap-2">
+            <div className="text-center pt-3 border-t border-navy-100 flex flex-col gap-2">
               <Link
                 href="/login"
-                className="text-xs font-semibold text-slate-500 hover:text-slate-800 inline-flex items-center justify-center gap-1.5 transition-colors"
+                className="text-xs font-semibold text-navy-500 hover:text-navy-800 inline-flex items-center justify-center gap-1.5 transition-colors"
               >
                 <ArrowLeft className="w-3.5 h-3.5" /> Return to Login
               </Link>
@@ -104,6 +127,8 @@ export default function ForgotPasswordPage() {
           </form>
         )}
 
+          </div>
+        </div>
       </div>
     </div>
   );

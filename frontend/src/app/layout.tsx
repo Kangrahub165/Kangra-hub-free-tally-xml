@@ -1,9 +1,16 @@
 import type { Metadata } from 'next';
+import { Inter } from 'next/font/google';
 import './globals.css';
 import { Header } from '@/components/Header';
 import { Footer } from '@/components/Footer';
 import { SEO_CONFIG } from '@/lib/seo.config';
 import { PwaInstallManager } from '@/components/pwa/PwaInstallManager';
+
+const inter = Inter({
+  subsets: ['latin'],
+  variable: '--font-inter',
+  display: 'swap',
+});
 
 export const metadata: Metadata = {
   metadataBase: new URL(SEO_CONFIG.siteUrl),
@@ -65,8 +72,8 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en">
-      <body className="antialiased min-h-screen flex flex-col justify-between">
+    <html lang="en" className={inter.variable}>
+      <body className="font-sans antialiased min-h-screen flex flex-col justify-between">
         <Header />
         <main className="flex-1">{children}</main>
         <Footer />

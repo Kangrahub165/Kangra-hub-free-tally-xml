@@ -200,7 +200,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
       {/* Mobile Backdrop Overlay */}
       {mobileSidebarOpen && (
         <div
-          className="fixed inset-0 bg-slate-950/80 backdrop-blur-xs z-30 md:hidden"
+          className="fixed inset-0 bg-navy-950/70 backdrop-blur-sm z-30 md:hidden animate-fadeIn"
           onClick={() => setMobileSidebarOpen(false)}
         />
       )}
@@ -208,25 +208,25 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
       {/* Admin Sidebar */}
       <aside
         className={`${
-          mobileSidebarOpen ? 'fixed inset-y-0 left-0 z-40 w-72' : 'hidden'
-        } md:flex md:w-64 bg-slate-950 text-slate-300 p-4 flex-col justify-between border-r border-slate-800/80 flex-shrink-0 md:sticky md:top-0 h-screen overflow-y-auto`}
+          mobileSidebarOpen ? 'fixed inset-y-0 left-0 z-40 w-72 animate-slideInRight' : 'hidden'
+        } md:flex md:w-64 gradient-hero text-slate-300 p-4 flex-col justify-between border-r border-accent-500/20 flex-shrink-0 md:sticky md:top-0 h-screen overflow-y-auto dark-scrollbar`}
       >
         <div>
           {/* Header Brand */}
-          <div className="flex items-center justify-between pb-5 border-b border-slate-800/80">
-            <div className="flex items-center gap-3">
+          <div className="flex items-center justify-between pb-5 border-b border-white/10">
+            <div className="flex items-center gap-3 group">
               <div className="relative w-8 h-8 flex-shrink-0">
                 <Image
                   src="/logo.webp"
                   alt="Kangra Hub"
                   width={32}
                   height={32}
-                  className="rounded-lg shadow-xs"
+                  className="rounded-lg shadow-glow-brand transition-transform group-hover:scale-105"
                 />
               </div>
               <div>
-                <div className="font-extrabold text-xs text-white leading-tight">Admin Console</div>
-                <div className="text-[10px] text-brand-400 font-semibold tracking-wider uppercase">Command Center</div>
+                <div className="font-extrabold text-xs text-white leading-tight drop-shadow-card">Admin Console</div>
+                <div className="text-[10px] text-accent-400 font-semibold tracking-wider uppercase">Command Center</div>
               </div>
             </div>
             {mobileSidebarOpen && (
@@ -256,10 +256,10 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
                         key={item.href}
                         href={item.href}
                         onClick={() => setMobileSidebarOpen(false)}
-                        className={`flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs font-semibold transition-all ${
+                        className={`flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs font-semibold transition-all nav-link ${
                           isActive
-                            ? 'bg-brand-600 text-white shadow-xs font-bold'
-                            : 'text-slate-400 hover:text-white hover:bg-slate-900'
+                            ? 'bg-brand-600/90 text-white shadow-glow-brand font-bold nav-link-active'
+                            : 'text-slate-400 hover:text-white hover:bg-white/5 nav-link-inactive'
                         }`}
                       >
                         <Icon className="w-3.5 h-3.5 flex-shrink-0" />
@@ -296,20 +296,20 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
       {/* Main Admin Workspace Area with Top Bar */}
       <div className="flex-1 flex flex-col min-w-0 min-h-screen">
         {/* Sticky Top Header Bar */}
-        <header className="sticky top-0 z-20 bg-slate-900 text-white px-4 sm:px-6 py-3 border-b border-slate-800 flex items-center justify-between shadow-xs">
+        <header className="sticky top-0 z-20 glass-header-dark text-white px-4 sm:px-6 py-3 border-b border-navy-800 flex items-center justify-between shadow-subtle">
           <div className="flex items-center gap-3 min-w-0">
             <button
               onClick={() => setMobileSidebarOpen(true)}
-              className="md:hidden p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
+              className="md:hidden p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-white/10 transition-colors"
               aria-label="Open sidebar"
             >
               <Menu className="w-5 h-5" />
             </button>
             <div className="min-w-0">
-              <div className="text-[10px] font-bold uppercase tracking-widest text-brand-400 truncate">
+              <div className="text-[10px] font-bold uppercase tracking-widest text-accent-400 truncate opacity-80">
                 Kangra Hub Admin
               </div>
-              <h1 className="text-sm font-extrabold text-white truncate">
+              <h1 className="text-sm font-extrabold text-white truncate drop-shadow-xs">
                 {getPageTitle()}
               </h1>
             </div>
@@ -318,9 +318,12 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
           <div className="flex items-center gap-2 sm:gap-3 flex-shrink-0">
             <AdminNotificationBell />
             <AdminPwaInstall />
-            <div className="hidden sm:flex items-center gap-2 pl-3 border-l border-slate-800 text-xs">
-              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-              <span className="font-mono text-slate-300 font-semibold">SUPER_ADMIN</span>
+            <div className="hidden sm:flex items-center gap-2 pl-3 border-l border-white/10 text-xs">
+              <span className="relative flex h-2 w-2">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+              </span>
+              <span className="font-mono text-emerald-50 font-bold bg-emerald-950/50 px-2 py-0.5 rounded border border-emerald-900/50">SUPER_ADMIN</span>
             </div>
           </div>
         </header>

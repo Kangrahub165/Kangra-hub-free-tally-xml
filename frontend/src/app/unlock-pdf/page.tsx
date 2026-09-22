@@ -121,8 +121,8 @@ export default function UnlockPdfPage() {
   };
 
   return (
-    <div className="py-10 bg-slate-50 min-h-screen">
-      <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 space-y-8">
+    <div className="py-10 bg-navy-50 gradient-surface min-h-screen">
+      <div className="max-w-4xl animate-fadeIn mx-auto px-4 sm:px-6 lg:px-8 space-y-8">
         
         {/* Header Title */}
         <div className="text-center space-y-2">
@@ -131,10 +131,10 @@ export default function UnlockPdfPage() {
               FREE SECURE UTILITY • 100% PRIVATE
             </Badge>
           </div>
-          <h1 className="text-3xl sm:text-4xl font-black text-slate-900 tracking-tight">
+          <h1 className="text-3xl sm:text-4xl font-black text-navy-900 tracking-tight">
             Unlock Bank Statement PDF
           </h1>
-          <p className="text-sm text-slate-600 max-w-xl mx-auto">
+          <p className="text-sm text-navy-600 max-w-xl mx-auto">
             Remove encryption passwords from protected bank statement PDFs in volatile memory. Download an unlocked copy or convert directly into balanced Tally XML.
           </p>
         </div>
@@ -156,7 +156,7 @@ export default function UnlockPdfPage() {
         )}
 
         {/* Upload Card */}
-        <Card className="p-6 sm:p-8 shadow-card border-slate-200">
+        <Card className="p-6 sm:p-8 shadow-card border-navy-200/60">
           <div className="space-y-6">
             {/* Drop Zone */}
             <div
@@ -170,7 +170,7 @@ export default function UnlockPdfPage() {
                   ? 'border-brand-500 bg-brand-50/60 scale-[0.99]'
                   : file
                   ? 'border-emerald-400 bg-emerald-50/40'
-                  : 'border-slate-300 hover:border-brand-400 hover:bg-slate-50/60'
+                  : 'border-navy-300/60 hover:border-brand-400 hover:bg-navy-50 gradient-surface/60'
               }`}
             >
               <input
@@ -180,35 +180,35 @@ export default function UnlockPdfPage() {
                 className="hidden"
                 onChange={handleFileChange}
               />
-              <div className={`w-16 h-16 rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-xs border ${
+              <div className={`w-16 h-16 rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-glow-brand border ${
                 file ? 'bg-emerald-100 text-emerald-700 border-emerald-200' : 'bg-brand-50 text-brand-600 border-brand-100'
               }`}>
                 {file ? <FileText className="w-8 h-8" /> : <UploadCloud className="w-8 h-8" />}
               </div>
-              <h2 className="text-lg font-bold text-slate-900 mb-1">
+              <h2 className="text-lg font-bold text-navy-900 mb-1">
                 {file ? file.name : 'Upload Password-Protected Statement PDF'}
               </h2>
-              <p className="text-xs text-slate-500 max-w-sm mx-auto mb-3">
+              <p className="text-xs text-navy-500 max-w-sm mx-auto mb-3">
                 {file
                   ? `${(file.size / (1024 * 1024)).toFixed(2)} MB • PDF selected. Enter password below.`
                   : 'Drag and drop your encrypted PDF statement here, or click to browse'}
               </p>
-              <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-slate-100 text-[11px] font-semibold text-slate-600">
+              <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-navy-100 text-[11px] font-semibold text-navy-600">
                 Supports PNB, SBI, HDFC, ICICI, Axis & 33+ Banks
               </div>
             </div>
 
             {/* Password Input Section */}
-            <div className="bg-slate-50 p-5 rounded-2xl border border-slate-200/80 space-y-4">
+            <div className="bg-navy-50 gradient-surface p-5 rounded-2xl border border-navy-200/60/80 space-y-4">
               <div className="flex items-center gap-3">
                 <div className="w-9 h-9 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center flex-shrink-0 border border-amber-100">
                   <Lock className="w-4 h-4" />
                 </div>
                 <div>
-                  <div className="text-xs font-bold text-slate-900 uppercase tracking-wider">
+                  <div className="text-xs font-bold text-navy-900 uppercase tracking-wider">
                     Statement PDF Password
                   </div>
-                  <div className="text-xs text-slate-500">
+                  <div className="text-xs text-navy-500">
                     Required to decrypt the protected document in volatile RAM
                   </div>
                 </div>
@@ -245,8 +245,8 @@ export default function UnlockPdfPage() {
             </div>
 
             {/* Alternative Actions */}
-            <div className="flex flex-col sm:flex-row items-center justify-between gap-4 pt-2 border-t border-slate-100">
-              <div className="flex items-center gap-2 text-xs text-slate-500">
+            <div className="flex flex-col sm:flex-row items-center justify-between gap-4 pt-2 border-t border-navy-100">
+              <div className="flex items-center gap-2 text-xs text-navy-500">
                 <ShieldCheck className="w-4 h-4 text-emerald-600 flex-shrink-0" />
                 <span>Zero permanent disk storage. Decrypted in ephemeral volatile RAM.</span>
               </div>
@@ -266,24 +266,24 @@ export default function UnlockPdfPage() {
         </Card>
 
         {/* Bank Password Quick Reference Guide */}
-        <Card className="p-6 shadow-xs border-slate-200">
+        <Card className="p-6 shadow-glow-brand border-navy-200/60">
           <CardHeader className="p-0 pb-4">
             <div className="flex items-center gap-2">
               <Building2 className="w-5 h-5 text-brand-600" />
-              <CardTitle className="text-base font-bold text-slate-900">
+              <CardTitle className="text-base font-bold text-navy-900">
                 Indian Bank Statement Password Formats Guide
               </CardTitle>
             </div>
-            <CardDescription className="text-xs text-slate-500">
+            <CardDescription className="text-xs text-navy-500">
               Most Indian banks password-protect digital statements using standardized personal identifiers:
             </CardDescription>
           </CardHeader>
           <CardContent className="p-0">
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2">
               {BANK_PASSWORD_HINTS.map((b) => (
-                <div key={b.bank} className="bg-slate-50 p-3 rounded-xl border border-slate-200/70 text-xs flex flex-col justify-center">
-                  <span className="font-bold text-slate-800">{b.bank}</span>
-                  <span className="text-slate-500 text-[11px] mt-0.5">{b.hint}</span>
+                <div key={b.bank} className="bg-navy-50 gradient-surface p-3 rounded-xl border border-navy-200/60/70 text-xs flex flex-col justify-center">
+                  <span className="font-bold text-navy-800">{b.bank}</span>
+                  <span className="text-navy-500 text-[11px] mt-0.5">{b.hint}</span>
                 </div>
               ))}
             </div>

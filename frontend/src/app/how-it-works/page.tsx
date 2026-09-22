@@ -67,18 +67,18 @@ export default function HowItWorksPage() {
   ];
 
   return (
-    <div className="py-16 bg-slate-50 min-h-screen">
-      <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8">
+    <div className="py-16 bg-navy-50 gradient-surface min-h-screen">
+      <div className="max-w-4xl animate-fadeIn mx-auto px-4 sm:px-6 lg:px-8">
         
         {/* Page Header */}
         <div className="text-center mb-14">
           <Badge variant="primary" size="sm" className="mb-3">
             Workflow Architecture
           </Badge>
-          <h1 className="text-3xl sm:text-4xl font-extrabold text-slate-900 tracking-tight">
+          <h1 className="text-3xl sm:text-4xl font-extrabold text-navy-900 tracking-tight">
             How Kangra Hub Converts Bank PDFs to Tally XML
           </h1>
-          <p className="mt-3 text-sm text-slate-600 max-w-xl mx-auto leading-relaxed">
+          <p className="mt-3 text-sm text-navy-600 max-w-xl mx-auto leading-relaxed">
             A fast, mathematically audited workflow engineered to eliminate manual voucher typing and balance discrepancy errors in Tally.
           </p>
         </div>
@@ -88,13 +88,13 @@ export default function HowItWorksPage() {
           {steps.map((s, idx) => (
             <Card key={s.step} hoverEffect className="p-6 sm:p-7 relative overflow-hidden">
               <div className="flex flex-col sm:flex-row items-start gap-5">
-                <div className="w-12 h-12 rounded-2xl bg-brand-50 text-brand-700 font-extrabold text-base flex items-center justify-center flex-shrink-0 border border-brand-200/80 shadow-xs">
+                <div className="w-12 h-12 rounded-2xl bg-brand-50 text-brand-700 font-extrabold text-base flex items-center justify-center flex-shrink-0 border border-brand-200/80 shadow-glow-brand">
                   {s.step}
                 </div>
 
                 <div className="flex-1">
                   <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
-                    <h2 className="text-base font-bold text-slate-900">
+                    <h2 className="text-base font-bold text-navy-900">
                       {s.title}
                     </h2>
                     <Badge variant="neutral" size="sm">
@@ -102,13 +102,13 @@ export default function HowItWorksPage() {
                     </Badge>
                   </div>
 
-                  <p className="text-xs text-slate-600 leading-relaxed mb-4">
+                  <p className="text-xs text-navy-600 leading-relaxed mb-4">
                     {s.description}
                   </p>
 
-                  <div className="bg-slate-50 rounded-xl p-3.5 border border-slate-200/70 space-y-1.5">
+                  <div className="bg-navy-50 gradient-surface rounded-xl p-3.5 border border-navy-200/60/70 space-y-1.5">
                     {s.details.map((detail, dIdx) => (
-                      <div key={dIdx} className="flex items-center gap-2 text-xs text-slate-700">
+                      <div key={dIdx} className="flex items-center gap-2 text-xs text-navy-700">
                         <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 flex-shrink-0" />
                         <span>{detail}</span>
                       </div>
@@ -121,12 +121,12 @@ export default function HowItWorksPage() {
         </div>
 
         {/* Tally Import Callout */}
-        <div className="mt-12 p-6 rounded-2xl bg-white border border-slate-200 shadow-card flex flex-col sm:flex-row items-center justify-between gap-6 text-left">
+        <div className="mt-12 p-6 rounded-2xl bg-white border border-navy-200/60 shadow-card flex flex-col sm:flex-row items-center justify-between gap-6 text-left">
           <div className="space-y-1">
-            <h3 className="text-sm font-bold text-slate-900">
+            <h3 className="text-sm font-bold text-navy-900">
               Ready to test a bank statement?
             </h3>
-            <p className="text-xs text-slate-500">
+            <p className="text-xs text-navy-500">
               Convert any digital bank statement and verify transactions in our live editor.
             </p>
           </div>

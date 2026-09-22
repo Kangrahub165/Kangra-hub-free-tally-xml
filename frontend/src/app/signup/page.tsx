@@ -306,9 +306,36 @@ function SignupContent() {
   };
 
   return (
-    <div className="min-h-[calc(100vh-5rem)] flex items-center justify-center p-4 sm:p-6 bg-slate-50">
-      <div className="max-w-md w-full bg-white p-6 sm:p-8 rounded-3xl border border-slate-200 shadow-elevated">
+    <div className="min-h-[calc(100vh-5rem)] flex items-center justify-center p-4 sm:p-6 lg:p-10 bg-navy-50 gradient-surface">
+      <div className="w-full max-w-5xl grid grid-cols-1 lg:grid-cols-12 bg-white glass-card rounded-3xl border border-navy-200/60 shadow-modal overflow-hidden animate-slideUp">
         
+        {/* Left Value Prop Hero (5 cols) */}
+        <div className="hidden lg:flex lg:col-span-5 gradient-hero p-8 flex-col justify-between text-white relative">
+          <div className="absolute inset-0 bg-[radial-gradient(#38bdf810_1px,transparent_1px)] bg-[size:16px_16px] pointer-events-none" />
+          <div className="relative z-10 space-y-6">
+            <Link href="/" className="flex items-center gap-3 inline-flex">
+              <div className="relative w-9 h-9 flex-shrink-0">
+                <Image src="/logo.webp" alt="Kangra Hub" width={36} height={36} className="rounded-xl shadow-glow-brand" />
+              </div>
+              <div className="flex flex-col">
+                <span className="font-extrabold text-base tracking-tight text-white leading-tight">Kangra Hub</span>
+                <span className="text-[10px] font-bold text-brand-300 tracking-wider uppercase">Free Tally XML</span>
+              </div>
+            </Link>
+            <div className="space-y-3 pt-4">
+              <Badge variant="success" size="sm" pulse>Daily 50-Page Free Quota</Badge>
+              <h2 className="text-xl font-extrabold text-white tracking-tight leading-snug">Join the standard for statement conversion.</h2>
+              <p className="text-xs text-navy-300 leading-relaxed">Create your account to start converting bank statements to Tally XML effortlessly.</p>
+            </div>
+          </div>
+          <div className="relative z-10 pt-6 border-t border-navy-800 text-[11px] text-navy-400">
+            🔒 Bank statements processed in ephemeral RAM.
+          </div>
+        </div>
+
+        {/* Right Form Column (7 cols) */}
+        <div className="lg:col-span-7 p-6 sm:p-10 flex flex-col justify-center">
+          <div className="max-w-md w-full mx-auto">
         {/* Header */}
         <div className="text-center mb-6">
           <Link href="/" className="inline-block mb-3 focus:outline-none">
@@ -317,13 +344,13 @@ function SignupContent() {
               alt="Kangra Hub"
               width={48}
               height={48}
-              className="mx-auto rounded-2xl shadow-xs"
+              className="mx-auto rounded-2xl shadow-glow-brand"
             />
           </Link>
-          <h1 className="text-2xl font-black text-slate-900 tracking-tight">
+          <h1 className="text-2xl font-black text-navy-900 tracking-tight">
             Create Free Account
           </h1>
-          <p className="text-xs text-slate-500 mt-1">
+          <p className="text-xs text-navy-500 mt-1">
             Fast, secure bank statement to Tally XML conversion
           </p>
 
@@ -338,14 +365,14 @@ function SignupContent() {
               <span>1. Registration</span>
             </div>
 
-            <span className="text-slate-300 text-xs">→</span>
+            <span className="text-navy-300 text-xs">→</span>
 
             <div className={`flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-full ${
               step === 'EMAIL_OTP'
                 ? 'bg-brand-50 text-brand-700 border border-brand-200/60'
-                : 'bg-slate-100 text-slate-400'
+                : 'bg-navy-100 text-navy-400'
             }`}>
-              <span className={`w-1.5 h-1.5 rounded-full ${step === 'EMAIL_OTP' ? 'bg-brand-600' : 'bg-slate-300'}`} />
+              <span className={`w-1.5 h-1.5 rounded-full ${step === 'EMAIL_OTP' ? 'bg-brand-600' : 'bg-navy-300'}`} />
               <span>2. Email Verification</span>
             </div>
           </div>
@@ -376,7 +403,7 @@ function SignupContent() {
             </p>
             <Link
               href={`/login?email=${encodeURIComponent(email.trim())}`}
-              className="inline-flex items-center justify-center gap-2 w-full py-2.5 px-4 bg-brand-600 hover:bg-brand-700 text-white font-bold text-xs rounded-xl shadow-xs transition-colors"
+              className="inline-flex items-center justify-center gap-2 w-full py-2.5 px-4 bg-brand-600 hover:bg-brand-700 text-white font-bold text-xs rounded-xl shadow-glow-brand transition-colors"
             >
               Go to Login
               <ArrowRight className="w-3.5 h-3.5" />
@@ -399,61 +426,61 @@ function SignupContent() {
           <form onSubmit={handleDetailsSubmit} className="space-y-3.5">
             {/* Full Name */}
             <div>
-              <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
+              <label className="block text-xs font-bold text-navy-700 uppercase tracking-wider mb-1.5">
                 Full Name
               </label>
               <div className="relative">
-                <User className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                <User className="w-4 h-4 text-navy-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
                 <input
                   type="text"
                   required
                   placeholder="Rahul Sharma"
                   value={fullName}
                   onChange={(e) => setFullName(e.target.value)}
-                  className="w-full bg-white text-sm text-slate-900 placeholder:text-slate-400 rounded-xl border border-slate-300 pl-10 pr-3.5 py-2.5 focus:outline-none focus:ring-2 focus:ring-brand-500/20 focus:border-brand-600"
+                  className="w-full bg-white text-sm text-navy-900 placeholder:text-navy-400 rounded-xl border border-navy-300/60 pl-10 pr-3.5 py-2.5 focus:outline-none focus:ring-2 focus:ring-brand-500/20 focus:border-accent-500 focus:ring-accent-500/20"
                 />
               </div>
             </div>
 
             {/* Email Address */}
             <div>
-              <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
+              <label className="block text-xs font-bold text-navy-700 uppercase tracking-wider mb-1.5">
                 Email Address
               </label>
               <div className="relative">
-                <Mail className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                <Mail className="w-4 h-4 text-navy-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
                 <input
                   type="email"
                   required
                   placeholder="rahul@company.com"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
-                  className="w-full bg-white text-sm text-slate-900 placeholder:text-slate-400 rounded-xl border border-slate-300 pl-10 pr-3.5 py-2.5 focus:outline-none focus:ring-2 focus:ring-brand-500/20 focus:border-brand-600"
+                  className="w-full bg-white text-sm text-navy-900 placeholder:text-navy-400 rounded-xl border border-navy-300/60 pl-10 pr-3.5 py-2.5 focus:outline-none focus:ring-2 focus:ring-brand-500/20 focus:border-accent-500 focus:ring-accent-500/20"
                 />
               </div>
             </div>
 
             {/* Mobile Number */}
             <div>
-              <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
-                Mobile Number <span className="text-slate-400 font-normal lowercase">(optional)</span>
+              <label className="block text-xs font-bold text-navy-700 uppercase tracking-wider mb-1.5">
+                Mobile Number <span className="text-navy-400 font-normal lowercase">(optional)</span>
               </label>
               <div className="flex gap-2">
                 <select
                   value={countryCode}
                   onChange={(e) => setCountryCode(e.target.value)}
-                  className="w-26 bg-white px-3 py-2.5 rounded-xl border border-slate-300 text-xs font-semibold text-slate-800 focus:outline-none focus:ring-2 focus:ring-brand-500/20 focus:border-brand-600"
+                  className="w-26 bg-white px-3 py-2.5 rounded-xl border border-navy-300/60 text-xs font-semibold text-navy-800 focus:outline-none focus:ring-2 focus:ring-brand-500/20 focus:border-accent-500 focus:ring-accent-500/20"
                 >
                   <option value="+91">+91 (IN)</option>
                 </select>
                 <div className="relative flex-1">
-                  <Phone className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                  <Phone className="w-4 h-4 text-navy-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
                   <input
                     type="tel"
                     placeholder="9876543210"
                     value={mobileNumber}
                     onChange={(e) => setMobileNumber(e.target.value.replace(/[^0-9]/g, ''))}
-                    className="w-full bg-white text-sm text-slate-900 placeholder:text-slate-400 rounded-xl border border-slate-300 pl-10 pr-3.5 py-2.5 focus:outline-none focus:ring-2 focus:ring-brand-500/20 focus:border-brand-600"
+                    className="w-full bg-white text-sm text-navy-900 placeholder:text-navy-400 rounded-xl border border-navy-300/60 pl-10 pr-3.5 py-2.5 focus:outline-none focus:ring-2 focus:ring-brand-500/20 focus:border-accent-500 focus:ring-accent-500/20"
                   />
                 </div>
               </div>
@@ -462,45 +489,45 @@ function SignupContent() {
             {/* Password Fields */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
-                <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
+                <label className="block text-xs font-bold text-navy-700 uppercase tracking-wider mb-1.5">
                   Password
                 </label>
                 <div className="relative">
-                  <Lock className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                  <Lock className="w-4 h-4 text-navy-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
                   <input
                     type={showPassword ? 'text' : 'password'}
                     required
                     placeholder="••••••••"
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
-                    className="w-full bg-white text-sm text-slate-900 rounded-xl border border-slate-300 pl-10 pr-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-brand-500/20 focus:border-brand-600"
+                    className="w-full bg-white text-sm text-navy-900 rounded-xl border border-navy-300/60 pl-10 pr-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-brand-500/20 focus:border-accent-500 focus:ring-accent-500/20"
                   />
                 </div>
               </div>
 
               <div>
-                <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
+                <label className="block text-xs font-bold text-navy-700 uppercase tracking-wider mb-1.5">
                   Confirm Password
                 </label>
                 <div className="relative">
-                  <Lock className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                  <Lock className="w-4 h-4 text-navy-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
                   <input
                     type={showPassword ? 'text' : 'password'}
                     required
                     placeholder="••••••••"
                     value={confirmPassword}
                     onChange={(e) => setConfirmPassword(e.target.value)}
-                    className="w-full bg-white text-sm text-slate-900 rounded-xl border border-slate-300 pl-10 pr-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-brand-500/20 focus:border-brand-600"
+                    className="w-full bg-white text-sm text-navy-900 rounded-xl border border-navy-300/60 pl-10 pr-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-brand-500/20 focus:border-accent-500 focus:ring-accent-500/20"
                   />
                 </div>
               </div>
             </div>
 
-            <div className="flex items-center justify-between text-xs text-slate-500">
+            <div className="flex items-center justify-between text-xs text-navy-500">
               <button
                 type="button"
                 onClick={() => setShowPassword(!showPassword)}
-                className="flex items-center gap-1.5 hover:text-slate-800"
+                className="flex items-center gap-1.5 hover:text-navy-800"
               >
                 {showPassword ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
                 <span>{showPassword ? 'Hide' : 'Show'} passwords</span>
@@ -514,9 +541,9 @@ function SignupContent() {
                 id="terms"
                 checked={termsAccepted}
                 onChange={(e) => setTermsAccepted(e.target.checked)}
-                className="mt-0.5 w-4 h-4 rounded text-brand-600 border-slate-300 focus:ring-brand-500"
+                className="mt-0.5 w-4 h-4 rounded text-brand-600 border-navy-300/60 focus:ring-brand-500"
               />
-              <label htmlFor="terms" className="text-xs text-slate-600 leading-relaxed select-none">
+              <label htmlFor="terms" className="text-xs text-navy-600 leading-relaxed select-none">
                 I agree to the{' '}
                 <Link href="/terms" className="text-brand-600 font-semibold hover:underline">
                   Terms of Service
@@ -544,15 +571,15 @@ function SignupContent() {
         {/* STEP 2: Email OTP Verification */}
         {step === 'EMAIL_OTP' && (
           <div className="space-y-6 text-center">
-            <div className="w-12 h-12 rounded-2xl bg-brand-50 text-brand-700 flex items-center justify-center mx-auto border border-brand-200/80 shadow-xs">
+            <div className="w-12 h-12 rounded-2xl bg-brand-50 text-brand-700 flex items-center justify-center mx-auto border border-brand-200/80 shadow-glow-brand">
               <Mail className="w-6 h-6 text-brand-600" />
             </div>
 
             <div className="space-y-1">
-              <h3 className="text-base font-bold text-slate-900">Verify Your Email</h3>
-              <p className="text-xs text-slate-500">
+              <h3 className="text-base font-bold text-navy-900">Verify Your Email</h3>
+              <p className="text-xs text-navy-500">
                 We've sent an {EMAIL_OTP_LENGTH}-digit verification code to:{' '}
-                <strong className="text-slate-800 font-medium">
+                <strong className="text-navy-800 font-medium">
                   {maskedEmail}
                 </strong>
               </p>
@@ -574,7 +601,7 @@ function SignupContent() {
                 <button
                   type="button"
                   onClick={handleCopyEnteredOtp}
-                  className="inline-flex items-center gap-1.5 px-3 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-xs font-semibold transition-colors"
+                  className="inline-flex items-center gap-1.5 px-3 py-1 bg-navy-100 hover:bg-navy-200 text-navy-700 rounded-lg text-xs font-semibold transition-colors"
                 >
                   {copiedOtp ? <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
                   <span>{copiedOtp ? 'Copied to Clipboard!' : 'Copy OTP'}</span>
@@ -596,10 +623,10 @@ function SignupContent() {
 
             {/* Resend & Back Navigation */}
             <div className="flex flex-col items-center gap-2.5 pt-1 text-xs">
-              <div className="text-slate-500">
+              <div className="text-navy-500">
                 Didn't receive the code?{' '}
                 {cooldown > 0 ? (
-                  <span className="font-semibold text-slate-400">
+                  <span className="font-semibold text-navy-400">
                     Resend available in <span className="font-mono text-brand-600">{cooldown}s</span>
                   </span>
                 ) : (
@@ -622,7 +649,7 @@ function SignupContent() {
                   setError('');
                   setSuccessInfo('');
                 }}
-                className="font-semibold text-slate-400 hover:text-slate-700 transition-colors"
+                className="font-semibold text-navy-400 hover:text-navy-700 transition-colors"
               >
                 ← Edit Registration Information
               </button>
@@ -630,13 +657,15 @@ function SignupContent() {
           </div>
         )}
 
-        <div className="pt-4 border-t border-slate-100 text-center text-xs text-slate-500">
+        <div className="pt-4 border-t border-navy-100 text-center text-xs text-navy-500">
           Already have an account?{' '}
           <Link href={`/login${redirectTarget !== '/dashboard' ? `?redirect=${encodeURIComponent(redirectTarget)}` : ''}`} className="font-bold text-brand-600 hover:text-brand-700">
             Sign In
           </Link>
         </div>
 
+          </div>
+        </div>
       </div>
     </div>
   );
@@ -645,10 +674,10 @@ function SignupContent() {
 export default function SignupPage() {
   return (
     <Suspense fallback={
-      <div className="min-h-[calc(100vh-5rem)] flex items-center justify-center p-6 bg-slate-50">
+      <div className="min-h-[calc(100vh-5rem)] flex items-center justify-center p-6 bg-navy-50 gradient-surface">
         <div className="text-center space-y-3">
           <div className="w-8 h-8 border-2 border-brand-600 border-t-transparent rounded-full animate-spin mx-auto" />
-          <p className="text-xs text-slate-500">Loading signup portal...</p>
+          <p className="text-xs text-navy-500">Loading signup portal...</p>
         </div>
       </div>
     }>

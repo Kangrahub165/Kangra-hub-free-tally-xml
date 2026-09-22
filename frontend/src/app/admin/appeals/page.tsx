@@ -180,7 +180,7 @@ function AdminAppealsContent() {
             onClick={() => setStatusFilter(st)}
             className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all ${
               statusFilter === st
-                ? 'bg-slate-900 text-white shadow-sm'
+                ? 'bg-slate-900 text-white shadow-xs'
                 : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-50'
             }`}
           >
@@ -219,7 +219,7 @@ function AdminAppealsContent() {
             description={search ? `No appeals match "${search}".` : 'There are no account appeals in this view.'}
           />
         ) : (
-          <Table>
+          <div className="overflow-x-auto">\n<Table>
             <TableHeader>
               <tr>
                 <TableHead>User Profile</TableHead>
@@ -307,7 +307,7 @@ function AdminAppealsContent() {
                 </TableRow>
               ))}
             </TableBody>
-          </Table>
+          </Table>\n</div>
         )}
       </Card>
 

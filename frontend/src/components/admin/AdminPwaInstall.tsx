@@ -112,7 +112,7 @@ export function AdminPwaInstall() {
       {/* Integrated Admin Header Install Button */}
       <button
         onClick={handleOpenModal}
-        className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 bg-brand-600 hover:bg-brand-500 text-white rounded-xl text-xs font-bold transition-all shadow-xs active:scale-95 focus:outline-none focus:ring-2 focus:ring-brand-400"
+        className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 bg-gradient-to-r from-brand-600 to-brand-500 hover:from-brand-500 hover:to-brand-400 text-white rounded-xl text-xs font-bold transition-all shadow-glow-brand active:scale-95 focus:outline-none focus:ring-2 focus:ring-brand-400 border-none"
         aria-label="Install Admin Console App"
         title="Install Kangra Hub Admin Console as an App"
       >
@@ -123,7 +123,7 @@ export function AdminPwaInstall() {
       {/* Professional Custom PWA Installation Modal */}
       {isModalOpen && (
         <div 
-          className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-950/70 backdrop-blur-xs animate-fadeIn"
+          className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-navy-950/70 backdrop-blur-sm animate-fadeIn"
           role="dialog"
           aria-modal="true"
           aria-labelledby="pwa-install-title"
@@ -136,7 +136,7 @@ export function AdminPwaInstall() {
           />
 
           {/* Modal Container */}
-          <div className="relative w-full max-w-md bg-white rounded-3xl shadow-2xl border border-slate-200 z-10 overflow-hidden animate-scaleIn max-h-[92vh] flex flex-col">
+          <div className="relative w-full max-w-md bg-white rounded-3xl shadow-modal border border-slate-200 z-10 overflow-hidden animate-scaleIn max-h-[92vh] flex flex-col">
             
             {/* Top Close Button */}
             <button
@@ -252,6 +252,7 @@ export function AdminPwaInstall() {
                   size="md"
                   onClick={handleTriggerInstall}
                   loading={isInstalling}
+                  className="bg-gradient-to-r from-brand-600 to-brand-500 border-none shadow-glow-brand hover:from-brand-500 hover:to-brand-400"
                   icon={<Download className="w-4 h-4" />}
                 >
                   Install App

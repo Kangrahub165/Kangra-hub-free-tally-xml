@@ -14,6 +14,8 @@ from app.api.usage import (
     get_user_additional_pages,
 )
 
+from app.core import db
+
 router = APIRouter(tags=["Payments"])
 
 # Storage directory for uploaded payment screenshots
@@ -24,9 +26,13 @@ PAYMENT_SCREENSHOT_DIR = os.path.join(
 )
 os.makedirs(PAYMENT_SCREENSHOT_DIR, exist_ok=True)
 
-# In-memory store for payment requests
-# Key: request_id -> dict
+# In-memory store for fast lookup, preloaded from SQLite
 PAYMENT_REQUESTS: Dict[str, Dict[str, Any]] = {}
+try:
+    for _pr in db.get_all_payment_requests():
+        PAYMENT_REQUESTS[_pr["id"]] = dict(_pr)
+except Exception as _e:
+    pass
 
 class PaymentConfigResponse(BaseModel):
     upi_id: str
@@ -55,6 +61,7 @@ class PaymentRequestResponse(BaseModel):
 
 class ApprovePaymentRequest(BaseModel):
     granted_pages: Optional[int] = None
+    verified_amount: Optional[float] = None
     admin_notes: Optional[str] = None
 
 class RejectPaymentRequest(BaseModel):
@@ -89,7 +96,7 @@ async def get_payment_configuration():
         upi_id=getattr(settings, "payment_upi_id", "9418250639@ybl"),
         price_per_page=getattr(settings, "page_price_inr", 2.0),
         qr_path=getattr(settings, "payment_qr_path", "/buy-a-coffee/googlepay_qr.png"),
-        whatsapp_number=getattr(settings, "payment_whatsapp_number", "+919418250639"),
+        whatsapp_number=getattr(settings, "payment_whatsapp_number", "+919805987622"),
         support_message="Complete manual payment of ₹2/page via Google Pay / UPI, then upload the transaction screenshot here."
     )
 
@@ -150,15 +157,33 @@ async def submit_payment_request(
         "approved_at": None,
     }
     PAYMENT_REQUESTS[request_id] = req_record
+    try:
+        db.save_payment_request(req_record)
+    except Exception as e:
+        pass
 
     return _format_request_response(req_record)
 
 @router.get("/api/payments/requests/me", response_model=List[PaymentRequestResponse])
 async def get_my_payment_requests(current_user: CurrentUser = Depends(get_current_user)):
     """Lists payment requests submitted by the logged in user."""
-    user_requests = [r for r in PAYMENT_REQUESTS.values() if r["user_id"] == current_user.id or r["user_email"] == current_user.email]
-    user_requests.sort(key=lambda x: x["created_at"], reverse=True)
-    return [_format_request_response(r) for r in user_requests]
+    db_requests = db.get_user_payment_requests(current_user.id)
+    if not db_requests and current_user.email:
+        db_requests = db.get_user_payment_requests(current_user.email)
+    
+    # Merge with in-memory
+    seen_ids = set()
+    combined = []
+    for r in db_requests:
+        seen_ids.add(r["id"])
+        combined.append(r)
+    for r in PAYMENT_REQUESTS.values():
+        if (r["user_id"] == current_user.id or r["user_email"] == current_user.email) and r["id"] not in seen_ids:
+            seen_ids.add(r["id"])
+            combined.append(r)
+
+    combined.sort(key=lambda x: str(x.get("created_at", "")), reverse=True)
+    return [_format_request_response(r) for r in combined]
 
 @router.get("/api/payments/requests/{request_id}/screenshot")
 async def get_payment_screenshot(
@@ -166,7 +191,7 @@ async def get_payment_screenshot(
     current_user: CurrentUser = Depends(get_current_user)
 ):
     """Securely streams payment screenshot to authorized user or admin."""
-    r = PAYMENT_REQUESTS.get(request_id)
+    r = PAYMENT_REQUESTS.get(request_id) or db.get_payment_request(request_id)
     if not r:
         raise HTTPException(status_code=404, detail="Payment request not found.")
     
@@ -190,11 +215,20 @@ async def get_admin_payment_requests(
     admin: CurrentUser = Depends(require_admin)
 ):
     """Admin: lists payment requests with optional status filter ('ALL', 'PENDING', 'APPROVED', 'REJECTED')."""
-    requests = list(PAYMENT_REQUESTS.values())
-    if status and status.upper() != "ALL":
-        requests = [r for r in requests if r["status"].upper() == status.upper()]
-    requests.sort(key=lambda x: x["created_at"], reverse=True)
-    return [_format_request_response(r) for r in requests]
+    db_reqs = db.get_all_payment_requests(status)
+    seen_ids = set()
+    combined = []
+    for r in db_reqs:
+        seen_ids.add(r["id"])
+        combined.append(r)
+    for r in PAYMENT_REQUESTS.values():
+        if r["id"] not in seen_ids:
+            if not status or status.upper() == "ALL" or r["status"].upper() == status.upper():
+                seen_ids.add(r["id"])
+                combined.append(r)
+
+    combined.sort(key=lambda x: str(x.get("created_at", "")), reverse=True)
+    return [_format_request_response(r) for r in combined]
 
 @router.post("/api/admin/payments/requests/{request_id}/approve")
 async def approve_payment_request(
@@ -213,11 +247,20 @@ async def approve_payment_request(
     if r["status"] == "APPROVED":
         raise HTTPException(status_code=400, detail="This payment request has already been approved.")
 
-    pages_to_grant = payload.granted_pages if payload.granted_pages is not None else r["requested_pages"]
+    # Strict page calculation: FLOOR(payment_amount / 2)
+    if payload.verified_amount is not None:
+        pages_to_grant = int(payload.verified_amount // 2)
+    elif payload.granted_pages is not None:
+        pages_to_grant = int(payload.granted_pages)
+    else:
+        pages_to_grant = int(r["amount_paid"] // 2)
+
     if pages_to_grant <= 0:
-        raise HTTPException(status_code=400, detail="Granted pages must be greater than zero.")
+        raise HTTPException(status_code=400, detail="Granted pages must be at least 1 (minimum payment ₹2).")
 
     user_id = r["user_id"]
+    prev_balance = db.get_additional_pages(user_id)
+
     new_balance = grant_user_additional_pages(
         user_id=user_id,
         pages=pages_to_grant,
@@ -232,6 +275,35 @@ async def approve_payment_request(
     r["approved_by"] = admin.email
     r["approved_at"] = now_iso
     r["updated_at"] = now_iso
+
+    try:
+        db.update_payment_request_status(
+            request_id=request_id,
+            status="APPROVED",
+            admin_email=admin.email,
+            granted_pages=pages_to_grant,
+            notes=payload.admin_notes
+        )
+    except Exception as e:
+        pass
+
+    # Log immutable audit event
+    try:
+        db.log_page_credit_event(
+            user_id=user_id,
+            conversion_id=r.get("job_id"),
+            payment_id=request_id,
+            amount=payload.verified_amount if payload.verified_amount is not None else r["amount_paid"],
+            pages_requested=r["requested_pages"],
+            pages_approved=pages_to_grant,
+            pages_credited=pages_to_grant,
+            admin_id=admin.email,
+            source="ADMIN_APPROVAL",
+            previous_balance=prev_balance,
+            new_balance=new_balance
+        )
+    except Exception as e:
+        pass
 
     # Append to AUDIT_LOGS
     try:
@@ -252,9 +324,12 @@ async def approve_payment_request(
     except Exception:
         pass
 
+    verified_amt = payload.verified_amount if payload.verified_amount is not None else r["amount_paid"]
     return {
         "success": True,
         "message": f"Approved {pages_to_grant} additional pages for {r['user_email']}.",
+        "granted_pages": pages_to_grant,
+        "amount_paid": verified_amt,
         "request": _format_request_response(r),
         "new_balance": new_balance
     }
@@ -266,7 +341,7 @@ async def reject_payment_request(
     admin: CurrentUser = Depends(require_admin)
 ):
     """Admin: rejects a payment request with an optional reason."""
-    r = PAYMENT_REQUESTS.get(request_id)
+    r = PAYMENT_REQUESTS.get(request_id) or db.get_payment_request(request_id)
     if not r:
         raise HTTPException(status_code=404, detail="Payment request not found.")
 
@@ -276,6 +351,17 @@ async def reject_payment_request(
     r["rejected_by"] = admin.email
     r["rejected_at"] = now_iso
     r["updated_at"] = now_iso
+    PAYMENT_REQUESTS[request_id] = r
+
+    try:
+        db.update_payment_request_status(
+            request_id=request_id,
+            status="REJECTED",
+            admin_email=admin.email,
+            notes=payload.reason
+        )
+    except Exception as e:
+        pass
 
     try:
         from app.api.admin import AUDIT_LOGS

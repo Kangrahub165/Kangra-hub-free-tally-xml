@@ -57,7 +57,7 @@ class Settings(BaseSettings):
     # Page pricing and payment configurations (PRD: ₹2/page manual UPI)
     page_price_inr: float = 2.0
     payment_upi_id: str = "9418250639@ybl"
-    payment_whatsapp_number: str = "+919418250639"
+    payment_whatsapp_number: str = "+919805987622"
     payment_qr_path: str = "/buy-a-coffee/googlepay_qr.png"
 
     # Buy a coffee configuration (Admin only)

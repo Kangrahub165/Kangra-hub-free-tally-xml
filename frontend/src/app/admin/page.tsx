@@ -77,27 +77,27 @@ export default function AdminOverviewPage() {
         </div>
 
         {/* Global Access Mode Switch (PRD Section 10, 11, 57) */}
-        <div className="flex items-center gap-3.5 bg-slate-50 p-2.5 rounded-2xl border border-slate-200/80">
+        <div className="flex items-center gap-3.5 bg-slate-50 p-3 rounded-2xl border border-slate-200/80 shadow-inner">
           <div className="text-left">
-            <span className="text-[10px] uppercase font-bold text-slate-400 block leading-none mb-1">
+            <span className="text-[10px] uppercase font-bold text-slate-500 block leading-none mb-1">
               Website Access Mode
             </span>
-            <span className={`text-xs font-black ${isFree ? 'text-emerald-700' : 'text-brand-700'}`}>
+            <span className={`text-xs font-black tracking-wide ${isFree ? 'text-emerald-600' : 'text-brand-600'}`}>
               {isFree ? 'FREE TO EVERYONE' : 'PAID SERVICE'}
             </span>
           </div>
           <button
             onClick={handleToggleMode}
             disabled={updatingMode}
-            className={`p-1.5 rounded-xl border transition-all ${
+            className={`p-2 rounded-xl border transition-all duration-300 ${
               isFree
-                ? 'bg-emerald-600 text-white border-emerald-700 hover:bg-emerald-700 shadow-xs'
-                : 'bg-brand-600 text-white border-brand-700 hover:bg-brand-700 shadow-xs'
+                ? 'bg-gradient-to-br from-emerald-500 to-emerald-600 text-white border-emerald-700 hover:shadow-glow-brand hover:scale-105'
+                : 'bg-gradient-to-br from-brand-500 to-brand-600 text-white border-brand-700 hover:shadow-glow-brand hover:scale-105'
             }`}
             title="Toggle between Free and Paid mode"
             aria-label="Toggle site access mode"
           >
-            {isFree ? <ToggleRight className="w-6 h-6" /> : <ToggleLeft className="w-6 h-6" />}
+            {isFree ? <ToggleRight className="w-5 h-5" /> : <ToggleLeft className="w-5 h-5" />}
           </button>
         </div>
       </div>
@@ -105,13 +105,14 @@ export default function AdminOverviewPage() {
       {/* 4 Metric Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-5">
         
-        <Card className="p-5 flex flex-col justify-between">
+        <Card className="p-5 flex flex-col justify-between relative overflow-hidden group hover:shadow-card-hover transition-all">
+          <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-brand-400 to-brand-600 opacity-0 group-hover:opacity-100 transition-opacity" />
           <div className="flex items-start justify-between">
             <div>
               <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Total Users</span>
               <div className="text-2xl font-black text-slate-900 mt-2 tabular-nums">{metrics?.total_users ?? 2}</div>
             </div>
-            <div className="w-9 h-9 rounded-xl bg-brand-50 text-brand-600 flex items-center justify-center border border-brand-100/70 shadow-xs">
+            <div className="w-9 h-9 rounded-xl bg-brand-50 text-brand-600 flex items-center justify-center border border-brand-100/70 shadow-xs group-hover:scale-110 transition-transform">
               <Users className="w-4 h-4" />
             </div>
           </div>
@@ -120,13 +121,14 @@ export default function AdminOverviewPage() {
           </div>
         </Card>
 
-        <Card className="p-5 flex flex-col justify-between">
+        <Card className="p-5 flex flex-col justify-between relative overflow-hidden group hover:shadow-card-hover transition-all">
+          <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-emerald-400 to-emerald-600 opacity-0 group-hover:opacity-100 transition-opacity" />
           <div className="flex items-start justify-between">
             <div>
               <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Unlimited Users</span>
               <div className="text-2xl font-black text-emerald-600 mt-2 tabular-nums">{metrics?.unlimited_users ?? 1}</div>
             </div>
-            <div className="w-9 h-9 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center border border-emerald-100/70 shadow-xs">
+            <div className="w-9 h-9 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center border border-emerald-100/70 shadow-xs group-hover:scale-110 transition-transform">
               <Sparkles className="w-4 h-4" />
             </div>
           </div>
@@ -135,13 +137,14 @@ export default function AdminOverviewPage() {
           </div>
         </Card>
 
-        <Card className="p-5 flex flex-col justify-between">
+        <Card className="p-5 flex flex-col justify-between relative overflow-hidden group hover:shadow-card-hover transition-all">
+          <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-purple-400 to-purple-600 opacity-0 group-hover:opacity-100 transition-opacity" />
           <div className="flex items-start justify-between">
             <div>
               <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Conversions Today</span>
               <div className="text-2xl font-black text-slate-900 mt-2 tabular-nums">{metrics?.conversions_today ?? 0}</div>
             </div>
-            <div className="w-9 h-9 rounded-xl bg-purple-50 text-purple-600 flex items-center justify-center border border-purple-100/70 shadow-xs">
+            <div className="w-9 h-9 rounded-xl bg-purple-50 text-purple-600 flex items-center justify-center border border-purple-100/70 shadow-xs group-hover:scale-110 transition-transform">
               <Layers className="w-4 h-4" />
             </div>
           </div>
@@ -150,13 +153,14 @@ export default function AdminOverviewPage() {
           </div>
         </Card>
 
-        <Card className="p-5 flex flex-col justify-between">
+        <Card className="p-5 flex flex-col justify-between relative overflow-hidden group hover:shadow-card-hover transition-all">
+          <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-emerald-400 to-emerald-600 opacity-0 group-hover:opacity-100 transition-opacity" />
           <div className="flex items-start justify-between">
             <div>
               <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Conversion Health</span>
               <div className="text-2xl font-black text-slate-900 mt-2 tabular-nums">100%</div>
             </div>
-            <div className="w-9 h-9 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center border border-emerald-100/70 shadow-xs">
+            <div className="w-9 h-9 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center border border-emerald-100/70 shadow-xs group-hover:scale-110 transition-transform">
               <CheckCircle2 className="w-4 h-4" />
             </div>
           </div>

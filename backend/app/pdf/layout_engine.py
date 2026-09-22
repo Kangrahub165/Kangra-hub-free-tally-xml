@@ -183,11 +183,15 @@ def match_table_column_map(header_row: List[Any]) -> Optional[Dict[str, int]]:
 
 def extract_structured_table_rows(
     file_path: str,
-    password: Optional[str] = None
+    password: Optional[str] = None,
+    start_page: int = 1,
+    max_pages: Optional[int] = None,
+    allowed_page_numbers: Optional[Any] = None
 ) -> List[RawTableRow]:
     """
-    Extracts isolated transaction rows from structured PDF tables across all pages.
+    Extracts isolated transaction rows from structured PDF tables strictly for authorized pages.
     Guarantees that multi-line cell contents remain strictly within their parent row.
+    Never reads or processes unauthorized pages beyond start_page + max_pages.
     """
     raw_rows: List[RawTableRow] = []
     global_row_index = 0
@@ -195,9 +199,17 @@ def extract_structured_table_rows(
     try:
         with pdfplumber.open(file_path, password=password) as pdf:
             current_col_map: Optional[Dict[str, int]] = None
+            total_file_pages = len(pdf.pages)
+            start_idx = max(0, start_page - 1)
+            end_idx = min(total_file_pages, start_idx + max_pages) if max_pages is not None else total_file_pages
 
-            for page_idx, page in enumerate(pdf.pages):
+            allowed_set = set(allowed_page_numbers) if allowed_page_numbers is not None else None
+
+            for page_idx in range(start_idx, end_idx):
                 page_num = page_idx + 1
+                if allowed_set is not None and page_num not in allowed_set:
+                    continue
+                page = pdf.pages[page_idx]
                 tables = page.extract_tables() or []
 
                 for table in tables:
@@ -231,6 +243,36 @@ def extract_structured_table_rows(
                         # Verify date format (DD/MM/YYYY, DD-MM-YYYY, DD Mon YYYY, YYYY-MM-DD, etc.)
                         date_match = re.search(r'(\d{4}[/\-\.]\d{1,2}[/\-\.]\d{1,2}|\d{1,2}[/\-\.](?:\d{1,2}|[A-Za-z]{3,9})[/\-\.]\d{2,4}|\d{1,2}\s+(?:\d{1,2}|[A-Za-z]{3,9})\s+\d{2,4})', raw_date)
                         if not date_match:
+                            # Multi-line narration continuation row support
+                            if raw_rows:
+                                prev_row = raw_rows[-1]
+                                dr_idx = current_col_map.get("debit")
+                                cr_idx = current_col_map.get("credit")
+                                amt_idx = current_col_map.get("amount")
+                                has_amt = bool(
+                                    (dr_idx is not None and dr_idx < len(cleaned_row) and re.search(r'\d', cleaned_row[dr_idx])) or
+                                    (cr_idx is not None and cr_idx < len(cleaned_row) and re.search(r'\d', cleaned_row[cr_idx])) or
+                                    (amt_idx is not None and amt_idx < len(cleaned_row) and re.search(r'\d', cleaned_row[amt_idx]))
+                                )
+                                if not has_amt:
+                                    narr_idx = current_col_map.get("narration")
+                                    cont_narr = cleaned_row[narr_idx] if (narr_idx is not None and narr_idx < len(cleaned_row)) else ""
+                                    ref_idx = current_col_map.get("reference")
+                                    cont_ref = cleaned_row[ref_idx] if (ref_idx is not None and ref_idx < len(cleaned_row)) else ""
+                                    addl_idx = current_col_map.get("additional_info")
+                                    cont_addl = cleaned_row[addl_idx] if (addl_idx is not None and addl_idx < len(cleaned_row)) else ""
+                                    
+                                    pieces = [p for p in [cont_narr, cont_ref, cont_addl] if p]
+                                    extra_text = " ".join(pieces).strip()
+                                    if not extra_text and row_text and not is_noise_text(row_text):
+                                        extra_text = row_text
+                                    if extra_text and not is_noise_text(extra_text):
+                                        prev_row.narration = f"{prev_row.narration} {extra_text}".strip()
+                                        prev_row.source_lines.append(row_text)
+                                        if not prev_row.reference_str:
+                                            ref_m = re.search(r'\b(?:UPI|IMPS|NEFT|RTGS|CHQ|REF)[/\s\.:#]+([A-Za-z0-9]+)\b', extra_text, re.IGNORECASE)
+                                            if ref_m:
+                                                prev_row.reference_str = ref_m.group(1)
                             continue
 
                         global_row_index += 1

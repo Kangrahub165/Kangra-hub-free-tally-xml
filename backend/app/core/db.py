@@ -1,9 +1,11 @@
 import os
 import sqlite3
 import json
+import uuid
 import logging
 import threading
 from datetime import datetime, timezone
+from decimal import Decimal
 from typing import Dict, Any, List, Optional
 
 logger = logging.getLogger("kangra_hub.db")
@@ -108,11 +110,58 @@ def init_db():
             );
             """)
 
+            # 6. Payment Requests Table (Permanent SQLite persistence)
+            cursor.execute("""
+            CREATE TABLE IF NOT EXISTS payment_requests (
+                id TEXT PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                user_email TEXT NOT NULL,
+                user_name TEXT,
+                requested_pages INTEGER NOT NULL,
+                granted_pages INTEGER NOT NULL,
+                amount_paid REAL NOT NULL,
+                job_id TEXT,
+                notes TEXT,
+                screenshot_path TEXT,
+                screenshot_filename TEXT,
+                status TEXT DEFAULT 'PENDING',
+                created_at TEXT,
+                updated_at TEXT,
+                admin_notes TEXT,
+                approved_by TEXT,
+                approved_at TEXT
+            );
+            """)
+
+            # 7. Page Credit Audit Log Table (Permanent server-side audit traceability)
+            cursor.execute("""
+            CREATE TABLE IF NOT EXISTS page_credit_audit_log (
+                id TEXT PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                conversion_id TEXT,
+                payment_id TEXT,
+                amount REAL DEFAULT 0.0,
+                pages_requested INTEGER DEFAULT 0,
+                pages_approved INTEGER DEFAULT 0,
+                pages_credited INTEGER DEFAULT 0,
+                admin_id TEXT,
+                source TEXT DEFAULT 'AUTO_PAYMENT',
+                timestamp TEXT,
+                previous_balance INTEGER DEFAULT 0,
+                new_balance INTEGER DEFAULT 0
+            );
+            """)
+
             # Indexes for ultra-fast querying
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_daily_usage_user_date ON daily_usage(user_id, date_str);")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_conversions_user_id ON conversions(user_id);")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_conversions_created_at ON conversions(created_at);")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_payment_requests_user_id ON payment_requests(user_id);")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_payment_requests_status ON payment_requests(status);")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_payment_requests_created_at ON payment_requests(created_at);")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_audit_log_user_id ON page_credit_audit_log(user_id);")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_audit_log_timestamp ON page_credit_audit_log(timestamp);")
 
             conn.commit()
 
@@ -449,7 +498,25 @@ def save_conversion(job: Dict[str, Any]) -> None:
     c_at = job.get("created_at")
     created_str = c_at.isoformat() if hasattr(c_at, "isoformat") else str(c_at or datetime.now(timezone.utc).isoformat())
 
-    # Extract clean metadata
+    # Extract clean metadata and serialize transactions for workspace persistence
+    tx_list = job.get("transactions") or []
+    serialized_txs = []
+    for tx in tx_list:
+        if hasattr(tx, "dict"):
+            t_dict = tx.dict()
+        elif hasattr(tx, "model_dump"):
+            t_dict = tx.model_dump()
+        elif isinstance(tx, dict):
+            t_dict = dict(tx)
+        else:
+            continue
+        for k, v in list(t_dict.items()):
+            if isinstance(v, Decimal):
+                t_dict[k] = float(v)
+            elif hasattr(v, "isoformat"):
+                t_dict[k] = v.isoformat()
+        serialized_txs.append(t_dict)
+
     meta = {
         "confidence_score": job.get("confidence_score"),
         "confidence_tier": job.get("confidence_tier"),
@@ -458,8 +525,13 @@ def save_conversion(job: Dict[str, Any]) -> None:
         "cash_ledger_name": job.get("cash_ledger_name"),
         "is_partial_conversion": job.get("is_partial_conversion", False),
         "pages_skipped": job.get("pages_skipped", 0),
+        "pages_pending": job.get("pages_pending", job.get("pages_skipped", 0)),
+        "page_statuses": job.get("page_statuses", {}),
         "pages_processed": job.get("pages_processed", job.get("page_count", 0)),
-        "total_pdf_pages": job.get("total_pdf_pages", job.get("page_count", 0))
+        "total_pdf_pages": job.get("total_pdf_pages", job.get("page_count", 0)),
+        "transactions": serialized_txs,
+        "pdf_path": job.get("pdf_path"),
+        "password": job.get("password")
     }
 
     with _LOCK:
@@ -503,6 +575,39 @@ def save_conversion(job: Dict[str, Any]) -> None:
         except Exception as e:
             logger.error(f"Failed to persist conversion {job_id}: {e}", exc_info=True)
             conn.rollback()
+        finally:
+            conn.close()
+
+def get_conversion_by_id(job_id: str) -> Optional[Dict[str, Any]]:
+    """Retrieves single conversion job by ID."""
+    with _LOCK:
+        conn = _get_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM conversions WHERE id = ?", (str(job_id).strip(),))
+            row = cursor.fetchone()
+            return dict(row) if row else None
+        finally:
+            conn.close()
+
+# Ergonomic alias
+get_conversion = get_conversion_by_id
+
+def get_latest_active_conversion(user_id_or_email: str) -> Optional[Dict[str, Any]]:
+    """Retrieves the latest conversion for session restoration."""
+    target = str(user_id_or_email).strip().lower()
+    with _LOCK:
+        conn = _get_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute("""
+            SELECT * FROM conversions
+            WHERE (lower(user_id) = ? OR lower(user_email) = ?)
+              AND status IN ('COMPLETED', 'PARTIALLY_COMPLETED', 'NEEDS_REVIEW')
+            ORDER BY created_at DESC LIMIT 1
+            """, (target, target))
+            row = cursor.fetchone()
+            return dict(row) if row else None
         finally:
             conn.close()
 
@@ -661,6 +766,276 @@ def set_custom_quota(user_id: str, quota: Optional[int]) -> None:
                     updated_at = excluded.updated_at
                 """, (uid, quota, now_iso))
             conn.commit()
+        finally:
+            conn.close()
+
+# ============================================================================
+# DAILY USAGE PERSISTENCE
+# ============================================================================
+
+def get_daily_usage(user_id: str, date_str: str) -> int:
+    """Returns persistent daily pages used for a user on a specific date."""
+    uid = str(user_id).strip()
+    d_str = str(date_str).strip()
+    with _LOCK:
+        conn = _get_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute("SELECT pages_used FROM daily_usage WHERE user_id = ? AND date_str = ?", (uid, d_str))
+            row = cursor.fetchone()
+            return row["pages_used"] if row else 0
+        finally:
+            conn.close()
+
+def set_daily_quota_usage(user_id: str, date_str: str, pages: int) -> int:
+    """Sets persistent daily pages used for a user on a specific date."""
+    uid = str(user_id).strip()
+    d_str = str(date_str).strip()
+    p = max(0, int(pages))
+    rec_id = f"{uid}:{d_str}"
+    now_iso = datetime.now(timezone.utc).isoformat()
+    with _LOCK:
+        conn = _get_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute("""
+            INSERT INTO daily_usage (id, user_id, date_str, pages_used, updated_at)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(user_id, date_str) DO UPDATE SET
+                pages_used = excluded.pages_used,
+                updated_at = excluded.updated_at
+            """, (rec_id, uid, d_str, p, now_iso))
+            conn.commit()
+            return p
+        finally:
+            conn.close()
+
+def increment_daily_usage(user_id: str, date_str: str, pages: int) -> int:
+    """Increments persistent daily pages used for a user on a specific date."""
+    curr = get_daily_usage(user_id, date_str)
+    new_pages = curr + max(0, int(pages))
+    return set_daily_quota_usage(user_id, date_str, new_pages)
+
+def increment_daily_quota_usage(user_id: str, date_str: str, pages: int) -> int:
+    """Alias for increment_daily_usage."""
+    return increment_daily_usage(user_id, date_str, pages)
+
+def reset_daily_usage(user_id: str, date_str: str) -> None:
+    """Resets daily usage for a user on a specific date."""
+    uid = str(user_id).strip()
+    d_str = str(date_str).strip()
+    with _LOCK:
+        conn = _get_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM daily_usage WHERE user_id = ? AND date_str = ?", (uid, d_str))
+            conn.commit()
+        finally:
+            conn.close()
+
+# ============================================================================
+# PAYMENT REQUESTS PERSISTENCE
+# ============================================================================
+
+def save_payment_request(r: Dict[str, Any]) -> None:
+    """Inserts or updates a payment request in SQLite."""
+    now_iso = datetime.now(timezone.utc).isoformat()
+    req_id = str(r["id"]).strip()
+    with _LOCK:
+        conn = _get_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute("""
+            INSERT INTO payment_requests (
+                id, user_id, user_email, user_name, requested_pages, granted_pages,
+                amount_paid, job_id, notes, screenshot_path, screenshot_filename,
+                status, created_at, updated_at, admin_notes, approved_by, approved_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+                granted_pages = excluded.granted_pages,
+                status = excluded.status,
+                updated_at = excluded.updated_at,
+                admin_notes = excluded.admin_notes,
+                approved_by = excluded.approved_by,
+                approved_at = excluded.approved_at
+            """, (
+                req_id,
+                r.get("user_id", ""),
+                r.get("user_email", ""),
+                r.get("user_name", ""),
+                int(r.get("requested_pages", 0)),
+                int(r.get("granted_pages", r.get("requested_pages", 0))),
+                float(r.get("amount_paid", 0.0)),
+                r.get("job_id"),
+                r.get("notes"),
+                r.get("screenshot_path", ""),
+                r.get("screenshot_filename", ""),
+                r.get("status", "PENDING"),
+                r.get("created_at") or now_iso,
+                r.get("updated_at") or now_iso,
+                r.get("admin_notes"),
+                r.get("approved_by"),
+                r.get("approved_at")
+            ))
+            conn.commit()
+        except Exception as e:
+            logger.error(f"Failed to persist payment request {req_id}: {e}", exc_info=True)
+            conn.rollback()
+        finally:
+            conn.close()
+
+def get_payment_request(request_id: str) -> Optional[Dict[str, Any]]:
+    """Retrieves payment request by ID."""
+    with _LOCK:
+        conn = _get_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM payment_requests WHERE id = ?", (str(request_id).strip(),))
+            row = cursor.fetchone()
+            return dict(row) if row else None
+        finally:
+            conn.close()
+
+def get_user_payment_requests(user_id_or_email: str) -> List[Dict[str, Any]]:
+    """Retrieves all payment requests for a user ordered newest first."""
+    target = str(user_id_or_email).strip().lower()
+    with _LOCK:
+        conn = _get_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute("""
+            SELECT * FROM payment_requests
+            WHERE lower(user_id) = ? OR lower(user_email) = ?
+            ORDER BY created_at DESC
+            """, (target, target))
+            return [dict(r) for r in cursor.fetchall()]
+        finally:
+            conn.close()
+
+def get_all_payment_requests(status: Optional[str] = None) -> List[Dict[str, Any]]:
+    """Retrieves all payment requests with optional status filter."""
+    with _LOCK:
+        conn = _get_connection()
+        try:
+            cursor = conn.cursor()
+            if status and status.upper() != "ALL":
+                cursor.execute("SELECT * FROM payment_requests WHERE upper(status) = ? ORDER BY created_at DESC", (status.upper(),))
+            else:
+                cursor.execute("SELECT * FROM payment_requests ORDER BY created_at DESC")
+            return [dict(r) for r in cursor.fetchall()]
+        finally:
+            conn.close()
+
+def update_payment_request_status(
+    request_id: str,
+    status: str,
+    admin_email: str,
+    granted_pages: Optional[int] = None,
+    notes: Optional[str] = None
+) -> Optional[Dict[str, Any]]:
+    """Updates status of payment request (e.g. APPROVED or REJECTED)."""
+    now_iso = datetime.now(timezone.utc).isoformat()
+    req_id = str(request_id).strip()
+    with _LOCK:
+        conn = _get_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM payment_requests WHERE id = ?", (req_id,))
+            row = cursor.fetchone()
+            if not row:
+                return None
+            current = dict(row)
+            g_pages = granted_pages if granted_pages is not None else current["granted_pages"]
+            cursor.execute("""
+            UPDATE payment_requests SET
+                status = ?,
+                granted_pages = ?,
+                admin_notes = ?,
+                approved_by = ?,
+                approved_at = ?,
+                updated_at = ?
+            WHERE id = ?
+            """, (status, g_pages, notes, admin_email, now_iso if status == "APPROVED" else current.get("approved_at"), now_iso, req_id))
+            conn.commit()
+            cursor.execute("SELECT * FROM payment_requests WHERE id = ?", (req_id,))
+            updated_row = cursor.fetchone()
+            return dict(updated_row) if updated_row else None
+        finally:
+            conn.close()
+
+# ============================================================================
+# PAGE CREDIT AUDIT LOGGING
+# ============================================================================
+
+def log_page_credit_event(
+    user_id: str,
+    pages_credited: int,
+    previous_balance: int,
+    new_balance: int,
+    conversion_id: Optional[str] = None,
+    payment_id: Optional[str] = None,
+    amount: float = 0.0,
+    pages_requested: int = 0,
+    pages_approved: int = 0,
+    admin_id: Optional[str] = None,
+    source: str = "ADMIN_APPROVAL"
+) -> Dict[str, Any]:
+    """Records an immutable audit entry for every page credit/adjustment event."""
+    record_id = f"audit-{uuid.uuid4().hex[:10]}"
+    now_iso = datetime.now(timezone.utc).isoformat()
+    record = {
+        "id": record_id,
+        "user_id": str(user_id).strip(),
+        "conversion_id": str(conversion_id).strip() if conversion_id else None,
+        "payment_id": str(payment_id).strip() if payment_id else None,
+        "amount": float(amount or 0.0),
+        "pages_requested": int(pages_requested or 0),
+        "pages_approved": int(pages_approved or 0),
+        "pages_credited": int(pages_credited or 0),
+        "admin_id": str(admin_id).strip() if admin_id else None,
+        "source": str(source).strip(),
+        "timestamp": now_iso,
+        "previous_balance": int(previous_balance or 0),
+        "new_balance": int(new_balance or 0)
+    }
+    with _LOCK:
+        conn = _get_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute("""
+            INSERT INTO page_credit_audit_log (
+                id, user_id, conversion_id, payment_id, amount,
+                pages_requested, pages_approved, pages_credited,
+                admin_id, source, timestamp, previous_balance, new_balance
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                record["id"], record["user_id"], record["conversion_id"], record["payment_id"],
+                record["amount"], record["pages_requested"], record["pages_approved"], record["pages_credited"],
+                record["admin_id"], record["source"], record["timestamp"], record["previous_balance"], record["new_balance"]
+            ))
+            conn.commit()
+            return record
+        finally:
+            conn.close()
+
+def get_page_credit_audit_logs(user_id: Optional[str] = None) -> List[Dict[str, Any]]:
+    """Retrieves immutable audit logs for auditing and dispute prevention."""
+    with _LOCK:
+        conn = _get_connection()
+        try:
+            cursor = conn.cursor()
+            if user_id:
+                cursor.execute("SELECT * FROM page_credit_audit_log WHERE user_id = ? ORDER BY timestamp DESC", (str(user_id).strip(),))
+            else:
+                cursor.execute("SELECT * FROM page_credit_audit_log ORDER BY timestamp DESC")
+            rows = []
+            for r in cursor.fetchall():
+                d = dict(r)
+                d["pages_granted"] = d.get("pages_credited", 0)
+                d["amount_paid"] = d.get("amount", 0.0)
+                d["event_type"] = d.get("source", "ADMIN_APPROVAL")
+                rows.append(d)
+            return rows
         finally:
             conn.close()
 

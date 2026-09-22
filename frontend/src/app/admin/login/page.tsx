@@ -172,7 +172,7 @@ function AdminLoginForm() {
         
         {/* Top Header Card Branding */}
         <div className="text-center mb-6 space-y-2">
-          <div className="inline-flex items-center justify-center w-14 h-14 rounded-2xl bg-gradient-to-tr from-brand-600 to-purple-600 text-white shadow-lg shadow-brand-500/20 mb-2 border border-white/10">
+          <div className="inline-flex items-center justify-center w-14 h-14 rounded-2xl bg-gradient-to-tr from-brand-600 to-purple-600 text-white shadow-elevated shadow-brand-500/20 mb-2 border border-white/10">
             <Shield className="w-7 h-7" />
           </div>
           <div className="flex items-center justify-center gap-2">
@@ -220,7 +220,7 @@ function AdminLoginForm() {
                   placeholder="Enter your admin email"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
-                  className="w-full bg-slate-800 border border-slate-700 text-white placeholder:text-slate-500 rounded-xl pl-10 pr-4 py-2.5 text-sm font-medium transition-all focus:outline-none focus:ring-2 focus:ring-brand-500/30 focus:border-brand-500"
+                  className="w-full bg-slate-800 border border-slate-700 text-white placeholder:text-slate-400 rounded-xl pl-10 pr-4 py-2.5 text-sm font-medium transition-all focus:outline-none focus:ring-2 focus:ring-brand-500/30 focus:border-brand-500"
                   autoComplete="username"
                   style={{ colorScheme: 'dark', backgroundColor: '#1e293b', color: '#ffffff' }}
                 />
@@ -254,7 +254,7 @@ function AdminLoginForm() {
                   placeholder="Enter your password"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  className="w-full bg-slate-800 border border-slate-700 text-white placeholder:text-slate-500 rounded-xl pl-10 pr-10 py-2.5 text-sm font-medium transition-all focus:outline-none focus:ring-2 focus:ring-brand-500/30 focus:border-brand-500"
+                  className="w-full bg-slate-800 border border-slate-700 text-white placeholder:text-slate-400 rounded-xl pl-10 pr-10 py-2.5 text-sm font-medium transition-all focus:outline-none focus:ring-2 focus:ring-brand-500/30 focus:border-brand-500"
                   autoComplete="current-password"
                   style={{ colorScheme: 'dark', backgroundColor: '#1e293b', color: '#ffffff' }}
                 />
@@ -273,7 +273,7 @@ function AdminLoginForm() {
               type="submit"
               variant="primary"
               size="md"
-              className="w-full mt-2 bg-gradient-to-r from-brand-600 to-purple-600 hover:from-brand-500 hover:to-purple-500 text-white shadow-md shadow-brand-600/30"
+              className="w-full mt-2 bg-gradient-to-r from-brand-600 to-purple-600 hover:from-brand-500 hover:to-purple-500 text-white shadow-card shadow-brand-600/30"
               loading={loading}
               iconRight={<ArrowRight className="w-4 h-4" />}
             >
@@ -296,10 +296,10 @@ function AdminLoginForm() {
 
       {/* Forgot Password Modal */}
       {showForgotModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm">
-          <div className="relative w-full max-w-sm bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-2xl space-y-4">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm animate-fadeIn">
+          <div className="relative w-full max-w-sm bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-2xl space-y-4 animate-slideUp">
             <div className="flex items-center gap-3">
-              <div className="w-9 h-9 rounded-xl bg-brand-500/20 text-brand-400 flex items-center justify-center">
+              <div className="w-9 h-9 rounded-xl bg-brand-500/20 text-brand-400 flex items-center justify-center shadow-glow-brand">
                 <KeyRound className="w-5 h-5" />
               </div>
               <div>
@@ -310,7 +310,7 @@ function AdminLoginForm() {
 
             {/* Security Notice Box */}
             <div className="p-3 bg-slate-800/80 border border-slate-700/60 rounded-xl space-y-1.5 text-xs">
-              <p className="text-[11px] text-slate-300 leading-relaxed">
+              <p className="text-[11px] text-slate-300 leading-relaxed font-medium">
                 Enter your registered administrator email address. If an active administrator account exists, recovery instructions will be dispatched to the verified recovery contact.
               </p>
             </div>
@@ -325,7 +325,7 @@ function AdminLoginForm() {
 
             <form onSubmit={handleForgotPassword} className="space-y-3">
               <div>
-                <label className="block text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-1">
+                <label className="block text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-1.5">
                   Admin Login Email
                 </label>
                 <input
@@ -334,18 +334,19 @@ function AdminLoginForm() {
                   placeholder="Enter your admin email"
                   value={resetEmail}
                   onChange={(e) => setResetEmail(e.target.value)}
-                  className="w-full bg-slate-800 border border-slate-700 text-white placeholder:text-slate-500 rounded-xl px-3.5 py-2 text-xs font-medium focus:outline-none focus:ring-2 focus:ring-brand-500/30"
+                  className="w-full bg-slate-800 border border-slate-700 text-white placeholder:text-slate-500 rounded-xl px-4 py-2.5 text-xs font-medium focus:outline-none focus:ring-2 focus:ring-brand-500/50 shadow-inner"
                   style={{ colorScheme: 'dark', backgroundColor: '#1e293b', color: '#ffffff' }}
                 />
               </div>
 
-              <div className="flex items-center justify-end gap-2 pt-2">
+              <div className="flex items-center justify-end gap-3 pt-3">
                 <Button
                   type="button"
                   variant="ghost"
                   size="sm"
                   onClick={() => setShowForgotModal(false)}
                   disabled={resetLoading}
+                  className="text-slate-400 hover:text-white hover:bg-slate-800 font-bold"
                 >
                   Cancel
                 </Button>
@@ -354,6 +355,7 @@ function AdminLoginForm() {
                   variant="primary"
                   size="sm"
                   loading={resetLoading}
+                  className="bg-brand-600 hover:bg-brand-500 text-white font-bold shadow-glow-brand"
                 >
                   Send Reset Link
                 </Button>

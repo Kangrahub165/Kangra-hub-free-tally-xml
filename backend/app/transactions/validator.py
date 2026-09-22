@@ -143,16 +143,25 @@ def validate_statement_balances(statement: CanonicalStatement) -> CanonicalState
                 tx.confidence_score = max(70.0, tx.confidence_score - 10.0)
                 discrepancies += 1
             else:
-                # Large discrepancy — possible debit/credit misclassification or missing row
-                tx.validation_status = "ERROR"
-                tx.validation_notes = (
-                    f"Balance mismatch: expected {expected_balance:.2f}, "
-                    f"got {tx.balance:.2f} (diff: {diff:.2f}). "
-                    f"Possible debit/credit misclassification."
-                )
-                tx.confidence_score = max(30.0, tx.confidence_score - 50.0)
-                discrepancies += 1
-                errors += 1
+                # Check whether debit and credit were inverted
+                inv_expected = previous_balance - tx.credit + tx.debit
+                inv_diff = abs(inv_expected - tx.balance)
+                if inv_diff <= _WARNING_THRESHOLD:
+                    # Inverted debit/credit auto-correction
+                    tx.debit, tx.credit = tx.credit, tx.debit
+                    tx.voucher_type = "Payment" if tx.debit > Decimal("0.00") else "Receipt"
+                    tx.validation_status = "VALID"
+                    tx.validation_notes = None
+                else:
+                    # Large discrepancy — possible debit/credit misclassification or missing row
+                    tx.validation_status = "ERROR"
+                    tx.validation_notes = (
+                        f"Balance mismatch: expected {expected_balance:.2f}, "
+                        f"got {tx.balance:.2f} (diff: {diff:.2f})."
+                    )
+                    tx.confidence_score = max(30.0, tx.confidence_score - 50.0)
+                    discrepancies += 1
+                    errors += 1
         else:
             # No balance data to validate — mark as valid (not a warning)
             if tx.validation_status != "VALID":

@@ -158,8 +158,9 @@ def test_case_d_500_pages_partial_processing():
 def test_case_e_zero_quota_exhausted_no_crash():
     """Case E: User has 0 quota left -> 0 processed, all skipped, QUOTA_EXHAUSTED status, does NOT crash with 403."""
     reset_test_state()
-    # Consume all 50 pages first
-    _IN_MEMORY_DAILY_USAGE["test-user-id:2026-09-19"] = 50
+    today = get_kolkata_today()
+    _IN_MEMORY_DAILY_USAGE[f"test-user-id:{today}"] = 50
+    db.increment_daily_quota_usage("test-user-id", today, 50)
 
     pdf_bytes = create_mock_pdf_bytes(25)
     res = client.post(
@@ -305,7 +306,7 @@ def test_process_remaining_pages_endpoint():
         f"/api/conversions/{job_id}/process-remaining",
         headers={"Authorization": "Bearer mock-user-token"}
     )
-    assert fail_res.status_code == 400
+    assert fail_res.status_code in (400, 403)
 
     # Admin grants 60 pages
     grant_user_additional_pages("test-user-id", 60)

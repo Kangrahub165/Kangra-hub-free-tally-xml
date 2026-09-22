@@ -1,4 +1,5 @@
 import React from 'react';
+import { cn } from '@/lib/utils';
 
 export function Card({
   children,
@@ -8,9 +9,11 @@ export function Card({
 }: React.HTMLAttributes<HTMLDivElement> & { hoverEffect?: boolean }) {
   return (
     <div
-      className={`bg-white rounded-2xl border border-slate-200/90 shadow-card transition-all duration-200 ${
-        hoverEffect ? 'hover:border-slate-300 hover:shadow-card-hover' : ''
-      } ${className}`}
+      className={cn(
+        'bg-white rounded-2xl border border-slate-200/80 shadow-card transition-all duration-200',
+        hoverEffect && 'hover:border-slate-300 hover:shadow-card-hover',
+        className
+      )}
       {...props}
     >
       {children}
@@ -24,7 +27,7 @@ export function CardHeader({
   ...props
 }: React.HTMLAttributes<HTMLDivElement>) {
   return (
-    <div className={`p-6 border-b border-slate-100 ${className}`} {...props}>
+    <div className={`p-6 border-b border-slate-100 bg-slate-50/50 rounded-t-2xl ${className}`} {...props}>
       {children}
     </div>
   );

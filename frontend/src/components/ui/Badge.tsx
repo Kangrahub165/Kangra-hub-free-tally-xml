@@ -1,4 +1,5 @@
 import React from 'react';
+import { cn } from '@/lib/utils';
 
 export interface BadgeProps extends React.HTMLAttributes<HTMLSpanElement> {
   variant?: 'neutral' | 'primary' | 'success' | 'warning' | 'danger' | 'purple';
@@ -15,17 +16,17 @@ export function Badge({
   ...props
 }: BadgeProps) {
   const sizeStyles = {
-    sm: 'text-[11px] px-2.5 py-0.5 font-semibold gap-1.5',
-    md: 'text-xs px-3 py-1 font-bold gap-2',
+    sm: 'text-[11px] px-2.5 py-0.5 font-bold gap-1.5',
+    md: 'text-xs px-3 py-1 font-extrabold gap-2',
   }[size];
 
   const variantStyles = {
-    neutral: 'bg-slate-100 text-slate-700 border-slate-200/80',
-    primary: 'bg-brand-50 text-brand-700 border-brand-200',
-    success: 'bg-emerald-50 text-emerald-700 border-emerald-200',
-    warning: 'bg-amber-50 text-amber-800 border-amber-200',
-    danger: 'bg-rose-50 text-rose-700 border-rose-200',
-    purple: 'bg-purple-50 text-purple-700 border-purple-200',
+    neutral: 'bg-slate-50 text-slate-700 ring-1 ring-inset ring-slate-200 border-transparent',
+    primary: 'bg-brand-50 text-brand-700 ring-1 ring-inset ring-brand-200 border-transparent',
+    success: 'bg-emerald-50 text-emerald-700 ring-1 ring-inset ring-emerald-200 border-transparent',
+    warning: 'bg-amber-50 text-amber-800 ring-1 ring-inset ring-amber-200 border-transparent',
+    danger: 'bg-rose-50 text-rose-700 ring-1 ring-inset ring-rose-200 border-transparent',
+    purple: 'bg-purple-50 text-purple-700 ring-1 ring-inset ring-purple-200 border-transparent',
   }[variant];
 
   const pulseColors = {
@@ -39,7 +40,12 @@ export function Badge({
 
   return (
     <span
-      className={`inline-flex items-center rounded-full border shadow-xs select-none transition-colors ${sizeStyles} ${variantStyles} ${className}`}
+      className={cn(
+        'inline-flex items-center rounded-full border shadow-xs select-none transition-colors',
+        sizeStyles,
+        variantStyles,
+        className
+      )}
       {...props}
     >
       {pulse && (

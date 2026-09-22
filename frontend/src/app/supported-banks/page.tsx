@@ -58,35 +58,35 @@ export default function SupportedBanksPage() {
   });
 
   return (
-    <div className="py-16 bg-slate-50 min-h-screen">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+    <div className="py-16 bg-navy-50 gradient-surface min-h-screen">
+      <div className="max-w-7xl animate-fadeIn mx-auto px-4 sm:px-6 lg:px-8">
         
         {/* Header */}
         <div className="text-center max-w-3xl mx-auto mb-10">
           <Badge variant="primary" size="sm" className="mb-3">
             Banking Coverage
           </Badge>
-          <h1 className="text-3xl sm:text-4xl font-extrabold text-slate-900 tracking-tight">
+          <h1 className="text-3xl sm:text-4xl font-extrabold text-navy-900 tracking-tight">
             Supported Banks & Statement Formats
           </h1>
-          <p className="mt-3 text-sm text-slate-600 leading-relaxed">
+          <p className="mt-3 text-sm text-navy-600 leading-relaxed">
             Kangra Hub maintains dedicated, tested parsers for 38 leading Indian public, private, and international banks with automatic column detection, multi-line narration joining, and running balance audits.
           </p>
 
           {/* Search Bar */}
           <div className="mt-8 max-w-lg mx-auto relative">
-            <Search className="w-4 h-4 text-slate-400 absolute left-4 top-1/2 -translate-y-1/2 pointer-events-none" />
+            <Search className="w-4 h-4 text-navy-400 absolute left-4 top-1/2 -translate-y-1/2 pointer-events-none" />
             <input
               type="text"
               placeholder="Search by bank name or statement format (e.g. PNB, SBI, HDFC)..."
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              className="w-full bg-white pl-11 pr-10 py-3 rounded-2xl border border-slate-300 text-sm text-slate-900 placeholder:text-slate-400 shadow-card focus:outline-none focus:ring-2 focus:ring-brand-500/20 focus:border-brand-600 transition-all"
+              className="w-full bg-white glass-card pl-11 pr-10 py-3 rounded-2xl border border-navy-300/60 text-sm text-navy-900 placeholder:text-navy-400 shadow-card focus:outline-none focus:ring-2 focus:ring-brand-500/20 focus:border-accent-500 focus:ring-accent-500/20 transition-all"
             />
             {search && (
               <button
                 onClick={() => setSearch('')}
-                className="absolute right-3.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 p-1"
+                className="absolute right-3.5 top-1/2 -translate-y-1/2 text-navy-400 hover:text-navy-600 p-1"
                 aria-label="Clear search"
               >
                 <X className="w-4 h-4" />
@@ -109,8 +109,8 @@ export default function SupportedBanksPage() {
                 onClick={() => setCategory(cat.id)}
                 className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition-all ${
                   category === cat.id
-                    ? 'bg-slate-900 text-white shadow-xs'
-                    : 'bg-white text-slate-600 border border-slate-200 hover:border-slate-300'
+                    ? 'bg-navy-900 text-white shadow-glow-brand'
+                    : 'bg-white text-navy-600 border border-navy-200/60 hover:border-navy-300/60'
                 }`}
               >
                 {cat.label}
@@ -121,7 +121,7 @@ export default function SupportedBanksPage() {
 
         {/* Banks Grid */}
         {loading ? (
-          <div className="text-center py-24 text-slate-400 text-xs flex items-center justify-center gap-2">
+          <div className="text-center py-24 text-navy-400 text-xs flex items-center justify-center gap-2">
             <div className="w-4 h-4 rounded-full border-2 border-brand-500 border-t-transparent animate-spin" />
             Loading registered bank parser catalog...
           </div>
@@ -154,7 +154,7 @@ export default function SupportedBanksPage() {
               >
                 <div>
                   <div className="flex items-start justify-between gap-3">
-                    <div className="w-10 h-10 rounded-xl bg-brand-50 text-brand-700 flex items-center justify-center flex-shrink-0 border border-brand-100/80 shadow-xs">
+                    <div className="w-10 h-10 rounded-xl bg-brand-50 text-brand-700 flex items-center justify-center flex-shrink-0 border border-brand-100/80 shadow-glow-brand">
                       <Building2 className="w-5 h-5" />
                     </div>
                     <Badge variant="success" size="sm">
@@ -162,16 +162,16 @@ export default function SupportedBanksPage() {
                     </Badge>
                   </div>
 
-                  <h2 className="text-sm font-bold text-slate-900 mt-3 leading-snug">
+                  <h2 className="text-sm font-bold text-navy-900 mt-3 leading-snug">
                     {bank.bank_name}
                   </h2>
-                  <p className="text-[11px] text-slate-500 mt-1">
-                    Layout: <span className="font-medium text-slate-700">{bank.format_name}</span>
+                  <p className="text-[11px] text-navy-500 mt-1">
+                    Layout: <span className="font-medium text-navy-700">{bank.format_name}</span>
                   </p>
                 </div>
 
-                <div className="mt-4 pt-3 border-t border-slate-100 flex items-center justify-between text-[11px] text-slate-500">
-                  <span className="font-mono text-[10px] text-slate-400 truncate max-w-[150px]">
+                <div className="mt-4 pt-3 border-t border-navy-100 flex items-center justify-between text-[11px] text-navy-500">
+                  <span className="font-mono text-[10px] text-navy-400 truncate max-w-[150px]">
                     {bank.parser_key}
                   </span>
                   <span className="text-emerald-700 font-semibold flex items-center gap-1 text-[10px]">
@@ -185,10 +185,10 @@ export default function SupportedBanksPage() {
 
         {/* Bottom CTA Card */}
         <Card className="mt-14 max-w-2xl mx-auto p-8 text-center shadow-card">
-          <h3 className="text-base font-bold text-slate-900 mb-1.5">
+          <h3 className="text-base font-bold text-navy-900 mb-1.5">
             Have a statement ready to convert?
           </h3>
-          <p className="text-xs text-slate-500 mb-6 max-w-md mx-auto leading-relaxed">
+          <p className="text-xs text-navy-500 mb-6 max-w-md mx-auto leading-relaxed">
             Convert your statement into balanced Tally XML vouchers in under 30 seconds.
           </p>
           <Link href="/convert">

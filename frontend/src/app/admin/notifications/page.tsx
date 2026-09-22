@@ -24,7 +24,8 @@ import {
   Copy,
   Building,
   FileText,
-  Check
+  Check,
+  MessageCircle
 } from 'lucide-react';
 import { 
   getAdminNotifications, 
@@ -241,31 +242,31 @@ function AdminNotificationsContent() {
         </div>
 
         {/* View Switcher Tabs */}
-        <div className="flex items-center gap-2 bg-slate-100 p-1 rounded-2xl self-start sm:self-auto">
+        <div className="flex items-center gap-2 bg-slate-100 p-1.5 rounded-2xl self-start sm:self-auto shadow-inner">
           <button
             onClick={() => setActiveView('inbox')}
-            className={`flex items-center gap-2 px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all ${
+            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-bold transition-all duration-300 ${
               activeView === 'inbox'
-                ? 'bg-white text-slate-900 shadow-xs'
-                : 'text-slate-600 hover:text-slate-900'
+                ? 'bg-white text-brand-700 shadow-md scale-100'
+                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/50 scale-95 hover:scale-100'
             }`}
           >
-            <Inbox className="w-3.5 h-3.5" />
+            <Inbox className={`w-4 h-4 ${activeView === 'inbox' ? 'text-brand-600' : ''}`} />
             <span>Inquiries & Alerts</span>
             {counts.total_unread > 0 && (
-              <span className="w-2 h-2 rounded-full bg-rose-500" />
+              <span className="w-2.5 h-2.5 rounded-full bg-rose-500 shadow-glow-brand animate-pulse" />
             )}
           </button>
 
           <button
             onClick={() => setActiveView('broadcast')}
-            className={`flex items-center gap-2 px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all ${
+            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-bold transition-all duration-300 ${
               activeView === 'broadcast'
-                ? 'bg-white text-slate-900 shadow-xs'
-                : 'text-slate-600 hover:text-slate-900'
+                ? 'bg-white text-brand-700 shadow-md scale-100'
+                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/50 scale-95 hover:scale-100'
             }`}
           >
-            <Megaphone className="w-3.5 h-3.5" />
+            <Megaphone className={`w-4 h-4 ${activeView === 'broadcast' ? 'text-brand-600' : ''}`} />
             <span>Broadcast Banners</span>
           </button>
         </div>
@@ -279,13 +280,13 @@ function AdminNotificationsContent() {
               onClick={() => setCategoryFilter(categoryFilter === 'CONTACT' ? 'ALL' : 'CONTACT')}
               className={`p-4 rounded-2xl border text-left transition-all ${
                 categoryFilter === 'CONTACT'
-                  ? 'bg-blue-50 border-blue-300 ring-2 ring-blue-500/20 shadow-xs'
+                  ? 'bg-brand-50 border-blue-300 ring-2 ring-blue-500/20 shadow-xs'
                   : 'bg-white border-slate-200 hover:border-slate-300 shadow-xs'
               }`}
             >
               <div className="flex items-center justify-between text-xs text-slate-500 font-semibold">
                 <span>Contact Messages</span>
-                <Mail className="w-4 h-4 text-blue-600" />
+                <Mail className="w-4 h-4 text-brand-600" />
               </div>
               <div className="text-2xl font-black text-slate-900 mt-2">
                 {counts.categories.contact_messages}
@@ -384,34 +385,41 @@ function AdminNotificationsContent() {
           </div>
 
           {/* Notifications Feed */}
-          <div className="space-y-3">
+          <div className="space-y-4">
             {loadingInbox ? (
-              <div className="p-12 text-center text-xs text-slate-400">
+              <div className="p-16 text-center text-xs text-slate-400 flex flex-col items-center justify-center gap-3">
+                <div className="w-6 h-6 rounded-full border-4 border-brand-500 border-t-transparent animate-spin" />
                 Loading notifications feed...
               </div>
             ) : filteredFeed.length === 0 ? (
-              <div className="p-12 text-center text-xs text-slate-400 bg-white rounded-3xl border border-dashed border-slate-200">
-                No notifications match your current filter.
+              <div className="p-16 text-center text-xs text-slate-400 bg-slate-50 rounded-3xl border-2 border-dashed border-slate-200 shadow-inner flex flex-col items-center justify-center gap-3">
+                <Inbox className="w-10 h-10 text-slate-300" />
+                <span>No notifications match your current filter.</span>
               </div>
             ) : (
               filteredFeed.map((item) => (
                 <Card
                   key={item.id}
-                  className={`p-4 sm:p-5 transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${
-                    !item.is_read ? 'border-brand-300 bg-brand-50/20' : 'bg-white'
+                  className={`p-5 transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-4 group relative overflow-hidden ${
+                    !item.is_read ? 'border-l-4 border-brand-500 bg-brand-50/10 shadow-card hover:shadow-card-hover hover:-translate-y-0.5' : 'bg-white hover:bg-slate-50 border-slate-200 shadow-sm hover:shadow-card'
                   }`}
                 >
-                  <div className="flex items-start gap-3.5 min-w-0">
-                    <div className="p-2 rounded-xl bg-slate-100 flex-shrink-0 mt-0.5">
-                      {item.category === 'CONTACT' && <Mail className="w-4 h-4 text-blue-600" />}
-                      {item.category === 'APPEAL' && <ShieldAlert className="w-4 h-4 text-rose-600" />}
-                      {item.category === 'REVIEW' && <FileCheck className="w-4 h-4 text-amber-600" />}
-                      {item.category === 'RECOVERY' && <KeyRound className="w-4 h-4 text-purple-600" />}
+                  <div className="flex items-start gap-4 min-w-0 z-10">
+                    <div className={`p-3 rounded-2xl flex-shrink-0 mt-0.5 shadow-inner ${
+                      item.category === 'CONTACT' ? 'bg-blue-100/50 text-brand-600' :
+                      item.category === 'APPEAL' ? 'bg-rose-100/50 text-rose-600' :
+                      item.category === 'REVIEW' ? 'bg-amber-100/50 text-amber-600' :
+                      'bg-purple-100/50 text-purple-600'
+                    }`}>
+                      {item.category === 'CONTACT' && <Mail className="w-5 h-5" />}
+                      {item.category === 'APPEAL' && <ShieldAlert className="w-5 h-5" />}
+                      {item.category === 'REVIEW' && <FileCheck className="w-5 h-5" />}
+                      {item.category === 'RECOVERY' && <KeyRound className="w-5 h-5" />}
                     </div>
 
-                    <div className="min-w-0 space-y-1">
+                    <div className="min-w-0 space-y-1.5">
                       <div className="flex items-center gap-2 flex-wrap">
-                        <span className="font-extrabold text-xs text-slate-900">
+                        <span className={`font-black text-sm truncate ${!item.is_read ? 'text-brand-900' : 'text-slate-900'}`}>
                           {item.title}
                         </span>
                         <Badge
@@ -429,18 +437,16 @@ function AdminNotificationsContent() {
                           {item.category_label}
                         </Badge>
                         {!item.is_read && (
-                          <Badge variant="danger" size="sm" pulse>
-                            Unread
-                          </Badge>
+                          <span className="w-2 h-2 rounded-full bg-brand-500 shadow-glow-brand animate-pulse"></span>
                         )}
                       </div>
 
-                      <p className="text-xs text-slate-600 leading-relaxed break-words">
+                      <p className={`text-xs leading-relaxed break-words font-medium ${!item.is_read ? 'text-slate-700' : 'text-slate-500'}`}>
                         {item.snippet}
                       </p>
 
-                      <div className="flex items-center gap-3 text-[11px] text-slate-400 font-mono pt-1">
-                        <span className="flex items-center gap-1">
+                      <div className="flex items-center gap-3 text-[11px] text-slate-400 font-mono pt-1.5">
+                        <span className="flex items-center gap-1.5 bg-slate-100 px-2 py-0.5 rounded-md">
                           <Clock className="w-3 h-3" />
                           {new Date(item.created_at).toLocaleString('en-IN', {
                             day: '2-digit',
@@ -450,21 +456,24 @@ function AdminNotificationsContent() {
                           })}
                         </span>
                         {item.metadata?.email && (
-                          <span>Email: {item.metadata.email}</span>
+                          <span className="bg-slate-100 px-2 py-0.5 rounded-md truncate max-w-[150px] sm:max-w-xs text-slate-500">
+                            {item.metadata.email}
+                          </span>
                         )}
                       </div>
                     </div>
                   </div>
 
-                  <div className="flex items-center gap-2 self-end sm:self-center flex-shrink-0 pt-2 sm:pt-0">
+                  <div className="flex items-center gap-2.5 self-end sm:self-center flex-shrink-0 pt-3 sm:pt-0 z-10 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity">
                     {!item.is_read && (
                       <Button
                         variant="ghost"
                         size="sm"
                         onClick={() => handleMarkSingleRead(item.id)}
                         title="Mark as read"
+                        className="bg-brand-50 hover:bg-brand-100 text-brand-700 rounded-xl"
                       >
-                        <CheckCheck className="w-3.5 h-3.5" />
+                        <CheckCheck className="w-4 h-4" />
                       </Button>
                     )}
 
@@ -473,10 +482,10 @@ function AdminNotificationsContent() {
                         variant="ghost"
                         size="sm"
                         onClick={() => handleDeleteMessage(item.id)}
-                        className="text-slate-400 hover:text-rose-600"
+                        className="text-rose-400 hover:text-rose-600 hover:bg-rose-50 rounded-xl"
                         title="Delete inquiry"
                       >
-                        <Trash2 className="w-3.5 h-3.5" />
+                        <Trash2 className="w-4 h-4" />
                       </Button>
                     )}
 
@@ -484,7 +493,8 @@ function AdminNotificationsContent() {
                       variant="primary"
                       size="sm"
                       onClick={() => handleOpenAction(item)}
-                      iconRight={<ExternalLink className="w-3 h-3" />}
+                      iconRight={<ExternalLink className="w-3.5 h-3.5" />}
+                      className="shadow-glow-brand rounded-xl font-bold px-4"
                     >
                       Open Action
                     </Button>
@@ -504,38 +514,42 @@ function AdminNotificationsContent() {
             </div>
           )}
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             {/* Announcement Banner */}
-            <Card className="p-6 space-y-4 shadow-card">
+            <Card className="p-6 space-y-5 shadow-card border-t-4 border-t-brand-500 rounded-3xl">
               <div className="flex items-center justify-between">
-                <h2 className="text-xs font-bold uppercase tracking-wider text-slate-800 flex items-center gap-2">
-                  <Bell className="w-4 h-4 text-brand-600" />
+                <h2 className="text-sm font-bold uppercase tracking-wider text-navy-900 flex items-center gap-2">
+                  <Bell className="w-5 h-5 text-brand-600" />
                   General Announcement Banner
                 </h2>
-                <input
-                  type="checkbox"
-                  checked={broadcastData.announcement_enabled}
-                  onChange={(e) => setBroadcastData({ ...broadcastData, announcement_enabled: e.target.checked })}
-                  className="w-4 h-4 accent-brand-600 rounded"
-                />
+                <label className="relative inline-flex items-center cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={broadcastData.announcement_enabled}
+                    onChange={(e) => setBroadcastData({ ...broadcastData, announcement_enabled: e.target.checked })}
+                    className="sr-only peer"
+                  />
+                  <div className="w-11 h-6 bg-slate-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-brand-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-brand-600"></div>
+                </label>
               </div>
 
-              <div>
-                <label className="block text-[11px] font-bold text-slate-700 uppercase mb-1">Banner Message</label>
+              <div className="space-y-1.5">
+                <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider">Banner Message</label>
                 <textarea
                   rows={3}
                   value={broadcastData.announcement_message}
                   onChange={(e) => setBroadcastData({ ...broadcastData, announcement_message: e.target.value })}
-                  className="w-full p-3 text-xs rounded-xl border border-slate-300"
+                  className="w-full p-4 text-sm rounded-xl border border-slate-300 focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500 shadow-inner resize-none transition-all"
+                  placeholder="Enter the broadcast message here..."
                 />
               </div>
 
-              <div>
-                <label className="block text-[11px] font-bold text-slate-700 uppercase mb-1">Banner Type</label>
+              <div className="space-y-1.5">
+                <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider">Banner Type</label>
                 <select
                   value={broadcastData.announcement_type}
                   onChange={(e) => setBroadcastData({ ...broadcastData, announcement_type: e.target.value })}
-                  className="w-full p-2 text-xs rounded-xl border border-slate-300"
+                  className="w-full p-3 text-sm rounded-xl border border-slate-300 focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500 shadow-inner transition-all appearance-none bg-white"
                 >
                   <option value="info">Informational (Blue)</option>
                   <option value="warning">Important Notice (Amber)</option>
@@ -545,31 +559,35 @@ function AdminNotificationsContent() {
             </Card>
 
             {/* Maintenance Mode Banner */}
-            <Card className="p-6 space-y-4 shadow-card">
+            <Card className="p-6 space-y-5 shadow-card border-t-4 border-t-amber-500 rounded-3xl">
               <div className="flex items-center justify-between">
-                <h2 className="text-xs font-bold uppercase tracking-wider text-slate-800 flex items-center gap-2">
-                  <AlertTriangle className="w-4 h-4 text-amber-600" />
+                <h2 className="text-sm font-bold uppercase tracking-wider text-navy-900 flex items-center gap-2">
+                  <AlertTriangle className="w-5 h-5 text-amber-600" />
                   Maintenance Schedule Banner
                 </h2>
-                <input
-                  type="checkbox"
-                  checked={broadcastData.maintenance_banner}
-                  onChange={(e) => setBroadcastData({ ...broadcastData, maintenance_banner: e.target.checked })}
-                  className="w-4 h-4 accent-amber-600 rounded"
-                />
+                <label className="relative inline-flex items-center cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={broadcastData.maintenance_banner}
+                    onChange={(e) => setBroadcastData({ ...broadcastData, maintenance_banner: e.target.checked })}
+                    className="sr-only peer"
+                  />
+                  <div className="w-11 h-6 bg-slate-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-amber-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-amber-500"></div>
+                </label>
               </div>
 
-              <div>
-                <label className="block text-[11px] font-bold text-slate-700 uppercase mb-1">Maintenance Notice</label>
+              <div className="space-y-1.5">
+                <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider">Maintenance Notice</label>
                 <textarea
                   rows={3}
                   value={broadcastData.maintenance_message}
                   onChange={(e) => setBroadcastData({ ...broadcastData, maintenance_message: e.target.value })}
-                  className="w-full p-3 text-xs rounded-xl border border-slate-300"
+                  className="w-full p-4 text-sm rounded-xl border border-slate-300 focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 shadow-inner resize-none transition-all"
+                  placeholder="e.g. Scheduled database optimization at 02:00 AM IST..."
                 />
               </div>
 
-              <p className="text-[11px] text-slate-400 leading-relaxed">
+              <p className="text-xs text-slate-500 leading-relaxed font-medium">
                 Warns active accountants before scheduled nightly upgrades or database optimizations.
               </p>
             </Card>
@@ -599,27 +617,28 @@ function AdminNotificationsContent() {
         title="Contact Inquiry Details"
         description="Public support & statement assistance inquiry"
         size="lg"
+        className="max-h-[90vh] overflow-y-auto"
       >
         {selectedMessage && (
-          <div className="space-y-5">
+          <div className="space-y-6 animate-fadeIn">
             {/* Metadata Badges & Timing */}
-            <div className="flex items-center justify-between flex-wrap gap-2 pb-3 border-b border-slate-100">
+            <div className="flex items-center justify-between flex-wrap gap-3 pb-4 border-b border-slate-100">
               <div className="flex items-center gap-2 flex-wrap">
-                <Badge variant="primary" size="sm">
+                <Badge variant="primary" size="md">
                   Contact Message
                 </Badge>
                 {selectedMessage.subject_type && (
-                  <Badge variant="purple" size="sm">
+                  <Badge variant="purple" size="md">
                     {String(selectedMessage.subject_type).replace(/_/g, ' ')}
                   </Badge>
                 )}
-                <Badge variant={selectedMessage.is_read ? 'neutral' : 'danger'} size="sm">
+                <Badge variant={selectedMessage.is_read ? 'neutral' : 'danger'} size="md">
                   {selectedMessage.is_read ? 'Read' : 'Unread'}
                 </Badge>
               </div>
 
-              <div className="flex items-center gap-1.5 text-xs text-slate-500 font-mono">
-                <Clock className="w-3.5 h-3.5 text-slate-400" />
+              <div className="flex items-center gap-1.5 text-xs text-slate-500 font-mono bg-slate-100 px-3 py-1.5 rounded-lg shadow-inner">
+                <Clock className="w-4 h-4 text-slate-400" />
                 <span>
                   {new Date(selectedMessage.created_at).toLocaleString('en-IN', {
                     day: '2-digit',
@@ -633,26 +652,26 @@ function AdminNotificationsContent() {
             </div>
 
             {/* Sender & Context Details */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-200/80 space-y-1">
-                <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1">
-                  <User className="w-3 h-3 text-slate-400" /> Sender Name
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="p-4 rounded-2xl bg-gradient-to-br from-slate-50 to-white border border-slate-200 shadow-sm space-y-1.5">
+                <div className="text-[10px] font-bold uppercase tracking-wider text-slate-500 flex items-center gap-1.5">
+                  <User className="w-4 h-4 text-brand-500" /> Sender Name
                 </div>
-                <div className="text-sm font-bold text-slate-900 truncate">
+                <div className="text-base font-black text-navy-900 truncate pl-1">
                   {selectedMessage.name || 'Anonymous User'}
                 </div>
               </div>
 
-              <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-200/80 space-y-1">
-                <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1 justify-between">
-                  <span className="flex items-center gap-1">
-                    <Mail className="w-3 h-3 text-slate-400" /> Sender Email
+              <div className="p-4 rounded-2xl bg-gradient-to-br from-slate-50 to-white border border-slate-200 shadow-sm space-y-1.5">
+                <div className="text-[10px] font-bold uppercase tracking-wider text-slate-500 flex items-center justify-between">
+                  <span className="flex items-center gap-1.5">
+                    <Mail className="w-4 h-4 text-brand-500" /> Sender Email
                   </span>
                   {selectedMessage.email && (
                     <button
                       type="button"
                       onClick={() => handleCopyEmail(selectedMessage.email)}
-                      className="text-brand-600 hover:text-brand-700 text-[10px] font-semibold inline-flex items-center gap-1"
+                      className="text-brand-600 hover:text-brand-700 text-[10px] font-semibold inline-flex items-center gap-1 bg-brand-50 px-2 py-0.5 rounded-full border border-brand-100 transition-colors"
                       title="Copy email address"
                     >
                       {copiedEmail ? <Check className="w-3 h-3 text-emerald-600" /> : <Copy className="w-3 h-3" />}
@@ -660,28 +679,28 @@ function AdminNotificationsContent() {
                     </button>
                   )}
                 </div>
-                <div className="text-sm font-bold text-slate-900 truncate">
+                <div className="text-sm font-bold text-navy-900 truncate pl-1 font-mono">
                   {selectedMessage.email || 'No email provided'}
                 </div>
               </div>
 
               {selectedMessage.bank_name && (
-                <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-200/80 space-y-1">
-                  <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1">
-                    <Building className="w-3 h-3 text-slate-400" /> Referenced Bank
+                <div className="p-4 rounded-2xl bg-gradient-to-br from-slate-50 to-white border border-slate-200 shadow-sm space-y-1.5">
+                  <div className="text-[10px] font-bold uppercase tracking-wider text-slate-500 flex items-center gap-1.5">
+                    <Building className="w-4 h-4 text-brand-500" /> Referenced Bank
                   </div>
-                  <div className="text-xs font-bold text-slate-800">
+                  <div className="text-sm font-bold text-navy-900 pl-1">
                     {selectedMessage.bank_name}
                   </div>
                 </div>
               )}
 
               {selectedMessage.job_id && (
-                <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-200/80 space-y-1">
-                  <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1">
-                    <FileText className="w-3 h-3 text-slate-400" /> Related Job ID
+                <div className="p-4 rounded-2xl bg-gradient-to-br from-slate-50 to-white border border-slate-200 shadow-sm space-y-1.5">
+                  <div className="text-[10px] font-bold uppercase tracking-wider text-slate-500 flex items-center gap-1.5">
+                    <FileText className="w-4 h-4 text-brand-500" /> Related Job ID
                   </div>
-                  <div className="text-xs font-mono font-bold text-slate-800">
+                  <div className="text-sm font-mono font-bold text-navy-900 pl-1">
                     {selectedMessage.job_id}
                   </div>
                 </div>
@@ -690,34 +709,35 @@ function AdminNotificationsContent() {
 
             {/* Complete User Message Body */}
             <div className="space-y-2">
-              <label className="text-[11px] font-bold uppercase tracking-wider text-slate-500 block">
-                User Inquiry / Request Details
+              <label className="text-xs font-bold uppercase tracking-wider text-slate-700 block flex items-center gap-2">
+                <MessageCircle className="w-4 h-4 text-slate-400" /> User Inquiry / Request Details
               </label>
-              <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200 text-xs text-slate-800 leading-relaxed whitespace-pre-wrap font-sans min-h-[90px]">
+              <div className="p-5 rounded-2xl bg-slate-50 border border-slate-200 text-sm text-slate-800 leading-relaxed whitespace-pre-wrap font-sans min-h-[120px] shadow-inner">
                 {selectedMessage.message || selectedMessage.snippet || 'No message text provided.'}
               </div>
             </div>
 
             {/* Modal Actions */}
-            <div className="pt-3 border-t border-slate-100 flex items-center justify-between flex-wrap gap-2">
+            <div className="pt-4 border-t border-slate-100 flex items-center justify-between flex-wrap gap-3">
               <Button
                 variant="outline"
-                size="sm"
+                size="md"
                 onClick={() => handleDeleteFromModal(selectedMessage.id)}
-                className="text-rose-600 hover:bg-rose-50 border-rose-200"
-                icon={<Trash2 className="w-3.5 h-3.5" />}
+                className="text-rose-600 hover:bg-rose-50 border-rose-200 font-bold"
+                icon={<Trash2 className="w-4 h-4" />}
               >
                 Delete Inquiry
               </Button>
 
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-3">
                 <Button
                   variant="secondary"
-                  size="sm"
+                  size="md"
                   onClick={() => {
                     setIsMessageModalOpen(false);
                     setSelectedMessage(null);
                   }}
+                  className="font-bold hover:bg-slate-200"
                 >
                   Close
                 </Button>
@@ -732,8 +752,9 @@ function AdminNotificationsContent() {
                   >
                     <Button
                       variant="primary"
-                      size="sm"
-                      icon={<Mail className="w-3.5 h-3.5" />}
+                      size="md"
+                      icon={<Mail className="w-4 h-4" />}
+                      className="shadow-glow-brand font-bold"
                     >
                       Reply via Email
                     </Button>

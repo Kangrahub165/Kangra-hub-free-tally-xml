@@ -670,7 +670,7 @@ export default function AdminConvertPage() {
             variant="outline"
             size="sm"
             onClick={() => setIsLedgerModalOpen(true)}
-            icon={<BookOpen className="w-4 h-4 text-blue-600" />}
+            icon={<BookOpen className="w-4 h-4 text-brand-600" />}
           >
             Import Tally Masters
             {userLedgers.length > 0 && (
@@ -722,10 +722,10 @@ export default function AdminConvertPage() {
           <CardContent className="p-6 sm:p-8 space-y-6">
             
             {/* Tally Master Pre-Configuration */}
-            <div className="p-5 rounded-2xl bg-blue-50/30 border border-blue-100 space-y-4">
+            <div className="p-5 rounded-2xl bg-brand-50/30 border border-blue-100 space-y-4">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
-                  <BookOpen className="w-4 h-4 text-blue-600" />
+                  <BookOpen className="w-4 h-4 text-brand-600" />
                   <span className="text-xs font-bold text-slate-900 uppercase tracking-wider">
                     Target Tally Ledger Configuration
                   </span>
@@ -743,7 +743,7 @@ export default function AdminConvertPage() {
                   variant="outline"
                   size="sm"
                   onClick={() => setIsLedgerModalOpen(true)}
-                  icon={<Sparkles className="w-3.5 h-3.5 text-blue-600" />}
+                  icon={<Sparkles className="w-3.5 h-3.5 text-brand-600" />}
                 >
                   {userLedgers.length > 0 
                     ? `${userLedgers.length} Ledgers & ${userGroups.length} Groups Loaded` 
@@ -1492,21 +1492,21 @@ export default function AdminConvertPage() {
                 </Button>
 
                 <Button
-                  variant="outline"
+                  variant="dark"
                   size="sm"
                   onClick={() => handleAutoResolveFallback(Array.from(selectedRowIndices))}
                   disabled={isBulkAssigning}
-                  className="border-slate-700 text-slate-200 hover:bg-slate-800 text-xs"
+                  className="border-slate-700 bg-slate-800 text-slate-100 hover:bg-slate-700 hover:text-white text-xs"
                 >
                   Auto-Resolve Fallback
                 </Button>
 
                 <Button
-                  variant="outline"
+                  variant="dark"
                   size="sm"
                   onClick={() => handleIgnoreWarnings(Array.from(selectedRowIndices))}
                   disabled={isBulkAssigning}
-                  className="border-slate-700 text-slate-200 hover:bg-slate-800 text-xs"
+                  className="border-slate-700 bg-slate-800 text-slate-100 hover:bg-slate-700 hover:text-white text-xs"
                 >
                   Ignore Warnings
                 </Button>
@@ -1713,7 +1713,7 @@ export default function AdminConvertPage() {
                                 <button
                                   type="button"
                                   onClick={() => handleTransactionChange(origIndex, 'ledger_name', tx.suggested_ledger)}
-                                  className="text-[10px] text-blue-600 hover:underline truncate max-w-[120px]"
+                                  className="text-[10px] text-brand-600 hover:underline truncate max-w-[120px]"
                                   title={`Click to apply: ${tx.suggested_ledger}`}
                                 >
                                   Suggest: {tx.suggested_ledger}

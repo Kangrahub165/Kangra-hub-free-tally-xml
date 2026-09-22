@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { 
   UploadCloud, 
   FileCode, 
@@ -56,6 +57,12 @@ export default function LedgerImportModal({ isOpen, onClose, onLedgersUpdated }:
   const [savingSingle, setSavingSingle] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
   useEffect(() => {
     if (isOpen) {
@@ -159,11 +166,17 @@ export default function LedgerImportModal({ isOpen, onClose, onLedgersUpdated }:
     );
   });
 
-  if (!isOpen) return null;
+  if (!isOpen || !mounted) return null;
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-200">
-      <div className="relative w-full max-w-4xl bg-white dark:bg-slate-900 rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-800 overflow-hidden flex flex-col max-h-[92vh]">
+  return createPortal(
+    <div className="fixed inset-0 z-[100] overflow-y-auto">
+      <div
+        className="fixed inset-0 bg-navy-950/70 backdrop-blur-sm transition-opacity animate-fadeIn"
+        onClick={onClose}
+        aria-hidden="true"
+      />
+      <div className="flex min-h-full items-center justify-center p-3 sm:p-4 md:p-6 pointer-events-none">
+        <div className="relative w-full max-w-4xl my-auto bg-white rounded-2xl sm:rounded-3xl shadow-modal border border-slate-200/80 overflow-hidden flex flex-col max-h-[calc(100dvh-2rem)] sm:max-h-[calc(100dvh-3.5rem)] pointer-events-auto z-10 animate-slideUp text-left">
         
         {/* Header */}
         <div className="px-6 py-4 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between bg-slate-50/50 dark:bg-slate-800/30">
@@ -542,5 +555,7 @@ export default function LedgerImportModal({ isOpen, onClose, onLedgersUpdated }:
 
       </div>
     </div>
-  );
+  </div>,
+  document.body
+);
 }

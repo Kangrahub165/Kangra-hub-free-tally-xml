@@ -48,7 +48,7 @@ export default function ContactPage() {
   };
 
   return (
-    <div className="py-16 bg-slate-50 min-h-screen">
+    <div className="py-16 bg-navy-50 gradient-surface min-h-screen">
       <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8">
         
         {/* Header */}
@@ -56,10 +56,10 @@ export default function ContactPage() {
           <Badge variant="primary" size="sm" className="mb-3">
             Support & Inquiries
           </Badge>
-          <h1 className="text-3xl sm:text-4xl font-extrabold text-slate-900 tracking-tight">
+          <h1 className="text-3xl sm:text-4xl font-extrabold text-navy-900 tracking-tight">
             Contact Kangra Hub Support
           </h1>
-          <p className="mt-3 text-sm text-slate-600 leading-relaxed">
+          <p className="mt-3 text-sm text-navy-600 leading-relaxed">
             Have a statement formatting question, format request, or issue with a converted file? Our engineering team is here to assist.
           </p>
         </div>
@@ -69,13 +69,13 @@ export default function ContactPage() {
           {/* Left Column: Guidelines & Channels (4 cols) */}
           <div className="lg:col-span-5 space-y-4">
             <Card className="p-6">
-              <h3 className="text-sm font-bold text-slate-900 mb-3 flex items-center gap-2">
+              <h3 className="text-sm font-bold text-navy-900 mb-3 flex items-center gap-2">
                 <HelpCircle className="w-4 h-4 text-brand-600" /> Reporting Guidelines
               </h3>
-              <p className="text-xs text-slate-600 leading-relaxed mb-4">
+              <p className="text-xs text-navy-600 leading-relaxed mb-4">
                 To help us troubleshoot statement conversion mismatches rapidly, please provide:
               </p>
-              <ul className="space-y-2 text-xs text-slate-700">
+              <ul className="space-y-2 text-xs text-navy-700">
                 <li className="flex items-start gap-2">
                   <span className="w-1.5 h-1.5 rounded-full bg-brand-600 flex-shrink-0 mt-1.5" />
                   <span>The <strong>Reference ID</strong> shown during failed conversions.</span>
@@ -91,11 +91,11 @@ export default function ContactPage() {
               </ul>
             </Card>
 
-            <Card className="p-6 bg-slate-900 text-white border-slate-800">
+            <Card className="p-6 bg-navy-900 text-white border-navy-800">
               <h3 className="text-sm font-bold text-white mb-2 flex items-center gap-2">
                 <Building2 className="w-4 h-4 text-brand-400" /> Request New Bank Parser
               </h3>
-              <p className="text-xs text-slate-300 leading-relaxed mb-3">
+              <p className="text-xs text-navy-300 leading-relaxed mb-3">
                 Need support for a cooperative bank or regional rural bank (RRB)? Select "Suggest a New Bank Statement Format" to submit statement headers for parser integration.
               </p>
               <span className="text-[11px] font-semibold text-brand-300">
@@ -109,18 +109,18 @@ export default function ContactPage() {
             <Card className="p-7 sm:p-8 shadow-card">
               {submitted ? (
                 <div className="text-center py-12 space-y-4">
-                  <div className="w-12 h-12 rounded-2xl bg-emerald-100 text-emerald-600 flex items-center justify-center mx-auto shadow-xs">
+                  <div className="w-12 h-12 rounded-2xl bg-emerald-100 text-emerald-600 flex items-center justify-center mx-auto shadow-glow-brand">
                     <CheckCircle2 className="w-6 h-6" />
                   </div>
                   <div className="space-y-1">
-                    <h2 className="text-lg font-bold text-slate-900">Message Received</h2>
-                    <p className="text-xs text-slate-600 max-w-sm mx-auto leading-relaxed">
+                    <h2 className="text-lg font-bold text-navy-900">Message Received</h2>
+                    <p className="text-xs text-navy-600 max-w-sm mx-auto leading-relaxed">
                       Thank you for reaching out. We have logged your request and dispatched it to our support specialists.
                     </p>
                   </div>
                   {referenceId && (
-                    <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl max-w-xs mx-auto text-xs text-slate-600">
-                      Tracking Reference: <strong className="font-mono text-slate-900">{referenceId}</strong>
+                    <div className="p-3 bg-navy-50 gradient-surface border border-navy-200/60 rounded-xl max-w-xs mx-auto text-xs text-navy-600">
+                      Tracking Reference: <strong className="font-mono text-navy-900">{referenceId}</strong>
                     </div>
                   )}
                   <div className="pt-2">
@@ -191,7 +191,7 @@ export default function ContactPage() {
                   )}
 
                   <div>
-                    <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
+                    <label className="block text-xs font-bold text-navy-700 uppercase tracking-wider mb-1.5">
                       Message Details
                     </label>
                     <textarea
@@ -200,7 +200,7 @@ export default function ContactPage() {
                       placeholder="Describe the issue, bank name, or details..."
                       value={formData.message}
                       onChange={(e) => setFormData({ ...formData, message: e.target.value })}
-                      className="w-full bg-white text-sm text-slate-900 rounded-xl border border-slate-300 p-3.5 focus:outline-none focus:ring-2 focus:ring-brand-500/20 focus:border-brand-600 transition-all placeholder:text-slate-400"
+                      className="w-full bg-white text-sm text-navy-900 rounded-xl border border-navy-300/60 p-3.5 focus:outline-none focus:ring-2 focus:ring-brand-500/20 focus:border-accent-500 focus:ring-accent-500/20 transition-all placeholder:text-navy-400"
                     />
                   </div>
 

@@ -75,122 +75,147 @@ export default function AdminSettingsPage() {
       <form onSubmit={handleSave} className="space-y-6">
         
         {/* Conversion Engine Quotas */}
-        <Card className="shadow-card">
-          <CardHeader>
-            <div className="flex items-center gap-2.5">
-              <div className="w-8 h-8 rounded-lg bg-brand-50 text-brand-700 flex items-center justify-center border border-brand-200/60 shadow-xs">
-                <SettingsIcon className="w-4 h-4" />
+        <Card className="shadow-card border-t-4 border-t-brand-500 rounded-3xl overflow-hidden">
+          <CardHeader className="bg-slate-50/50 border-b border-slate-100 pb-5">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-brand-50 to-white text-brand-600 flex items-center justify-center border border-brand-200 shadow-sm">
+                <SettingsIcon className="w-5 h-5" />
               </div>
               <div>
-                <CardTitle>Conversion Engine Limits</CardTitle>
-                <CardDescription>
+                <CardTitle className="text-lg font-black text-navy-900">Conversion Engine Limits</CardTitle>
+                <CardDescription className="text-xs text-slate-500 font-medium mt-0.5">
                   Configure the default allowances and file constraints applied across user accounts
                 </CardDescription>
               </div>
             </div>
           </CardHeader>
 
-          <CardContent className="space-y-4">
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <Input
-                type="number"
-                label="Free Daily Page Limit (Per User)"
-                value={settings.free_daily_page_limit}
-                onChange={(e) => setSettings({ ...settings, free_daily_page_limit: Number(e.target.value) })}
-                helperText="Standard default: 50 pages per calendar day"
-              />
+          <CardContent className="space-y-5 pt-6">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+              <div className="space-y-1.5">
+                <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider">Free Daily Page Limit (Per User)</label>
+                <Input
+                  type="number"
+                  value={settings.free_daily_page_limit}
+                  onChange={(e) => setSettings({ ...settings, free_daily_page_limit: Number(e.target.value) })}
+                  className="h-11 shadow-inner focus:ring-brand-500/20 focus:border-brand-500 text-sm font-bold"
+                />
+                <p className="text-[10px] text-slate-500 font-medium">Standard default: 50 pages per calendar day</p>
+              </div>
 
-              <Input
-                type="number"
-                label="Max Upload Size (MB)"
-                value={settings.max_upload_size_mb}
-                onChange={(e) => setSettings({ ...settings, max_upload_size_mb: Number(e.target.value) })}
-                helperText="Maximum allowed PDF statement file size (Default: 25 MB)"
-              />
+              <div className="space-y-1.5">
+                <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider">Max Upload Size (MB)</label>
+                <Input
+                  type="number"
+                  value={settings.max_upload_size_mb}
+                  onChange={(e) => setSettings({ ...settings, max_upload_size_mb: Number(e.target.value) })}
+                  className="h-11 shadow-inner focus:ring-brand-500/20 focus:border-brand-500 text-sm font-bold"
+                />
+                <p className="text-[10px] text-slate-500 font-medium">Maximum allowed PDF statement file size (Default: 25 MB)</p>
+              </div>
 
-              <Input
-                type="number"
-                label="Max Pages Per Statement File"
-                value={settings.max_pages_per_file}
-                onChange={(e) => setSettings({ ...settings, max_pages_per_file: Number(e.target.value) })}
-                helperText="Maximum statement page count before rejection (Default: 200)"
-              />
+              <div className="space-y-1.5">
+                <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider">Max Pages Per Statement File</label>
+                <Input
+                  type="number"
+                  value={settings.max_pages_per_file}
+                  onChange={(e) => setSettings({ ...settings, max_pages_per_file: Number(e.target.value) })}
+                  className="h-11 shadow-inner focus:ring-brand-500/20 focus:border-brand-500 text-sm font-bold"
+                />
+                <p className="text-[10px] text-slate-500 font-medium">Maximum statement page count before rejection (Default: 200)</p>
+              </div>
 
-              <Select
-                label="System Maintenance Mode"
-                value={settings.maintenance_mode ? 'true' : 'false'}
-                onChange={(e) => setSettings({ ...settings, maintenance_mode: e.target.value === 'true' })}
-                helperText="When enabled, non-admin conversions are paused with a notice"
-              >
-                <option value="false">Disabled (Normal Operations)</option>
-                <option value="true">Enabled (Under Maintenance)</option>
-              </Select>
+              <div className="space-y-1.5">
+                <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider">System Maintenance Mode</label>
+                <Select
+                  value={settings.maintenance_mode ? 'true' : 'false'}
+                  onChange={(e) => setSettings({ ...settings, maintenance_mode: e.target.value === 'true' })}
+                  className="h-11 shadow-inner focus:ring-amber-500/20 focus:border-amber-500 text-sm font-bold bg-white"
+                >
+                  <option value="false">Disabled (Normal Operations)</option>
+                  <option value="true">Enabled (Under Maintenance)</option>
+                </Select>
+                <p className="text-[10px] text-slate-500 font-medium">When enabled, non-admin conversions are paused with a notice</p>
+              </div>
             </div>
           </CardContent>
         </Card>
 
         {/* Section 129: Buy Me a Coffee Support Parameters */}
-        <Card className="shadow-card">
-          <CardHeader>
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2.5">
-                <div className="w-8 h-8 rounded-lg bg-amber-50 text-amber-600 flex items-center justify-center border border-amber-200/60 shadow-xs">
-                  <Coffee className="w-4 h-4" />
+        <Card className="shadow-card border-t-4 border-t-amber-500 rounded-3xl overflow-hidden">
+          <CardHeader className="bg-slate-50/50 border-b border-slate-100 pb-5">
+            <div className="flex items-center justify-between flex-wrap gap-3">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-amber-50 to-white text-amber-600 flex items-center justify-center border border-amber-200 shadow-sm">
+                  <Coffee className="w-5 h-5" />
                 </div>
                 <div>
-                  <CardTitle>Section 129: Project Support Settings (Admin Only)</CardTitle>
-                  <CardDescription>
+                  <CardTitle className="text-lg font-black text-navy-900">Section 129: Project Support Settings</CardTitle>
+                  <CardDescription className="text-xs text-slate-500 font-medium mt-0.5">
                     Configure the voluntary support widget shown exclusively inside the administrator portal
                   </CardDescription>
                 </div>
               </div>
-              <Badge variant="warning" size="sm">
-                Owner Only
-              </Badge>
+              <span className="px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-wider bg-rose-50 text-rose-700 border border-rose-200 flex items-center gap-1 shadow-sm">
+                <ShieldAlert className="w-3 h-3" /> Owner Only
+              </span>
             </div>
           </CardHeader>
 
-          <CardContent className="space-y-4">
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <Select
-                label="Widget Visibility"
-                value={settings.buy_coffee_enabled ? 'true' : 'false'}
-                onChange={(e) => setSettings({ ...settings, buy_coffee_enabled: e.target.value === 'true' })}
-                helperText="Controls display inside the Admin Console"
-              >
-                <option value="true">Enabled (Visible in Admin Console)</option>
-                <option value="false">Disabled</option>
-              </Select>
+          <CardContent className="space-y-5 pt-6">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+              <div className="space-y-1.5">
+                <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider">Widget Visibility</label>
+                <Select
+                  value={settings.buy_coffee_enabled ? 'true' : 'false'}
+                  onChange={(e) => setSettings({ ...settings, buy_coffee_enabled: e.target.value === 'true' })}
+                  className="h-11 shadow-inner focus:ring-amber-500/20 focus:border-amber-500 text-sm font-bold bg-white"
+                >
+                  <option value="true">Enabled (Visible in Admin Console)</option>
+                  <option value="false">Disabled</option>
+                </Select>
+                <p className="text-[10px] text-slate-500 font-medium">Controls display inside the Admin Console</p>
+              </div>
 
-              <Input
-                label="Owner UPI ID"
-                placeholder="e.g. name@bank"
-                value={settings.buy_coffee_upi_id || ''}
-                onChange={(e) => setSettings({ ...settings, buy_coffee_upi_id: e.target.value })}
-                helperText="Displayed with one-click copy button inside the support modal"
-              />
+              <div className="space-y-1.5">
+                <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider">Owner UPI ID</label>
+                <Input
+                  placeholder="e.g. name@bank"
+                  value={settings.buy_coffee_upi_id || ''}
+                  onChange={(e) => setSettings({ ...settings, buy_coffee_upi_id: e.target.value })}
+                  className="h-11 shadow-inner focus:ring-amber-500/20 focus:border-amber-500 text-sm font-bold"
+                />
+                <p className="text-[10px] text-slate-500 font-medium">Displayed with one-click copy button inside the support modal</p>
+              </div>
 
-              <Input
-                label="Card Action Button Text"
-                value={settings.buy_coffee_button_text || 'Support Project ☕'}
-                onChange={(e) => setSettings({ ...settings, buy_coffee_button_text: e.target.value })}
-              />
+              <div className="space-y-1.5">
+                <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider">Card Action Button Text</label>
+                <Input
+                  value={settings.buy_coffee_button_text || 'Support Project ☕'}
+                  onChange={(e) => setSettings({ ...settings, buy_coffee_button_text: e.target.value })}
+                  className="h-11 shadow-inner focus:ring-amber-500/20 focus:border-amber-500 text-sm font-bold"
+                />
+              </div>
 
-              <Input
-                label="Support Pitch Message"
-                value={settings.buy_coffee_message || ''}
-                onChange={(e) => setSettings({ ...settings, buy_coffee_message: e.target.value })}
-              />
+              <div className="space-y-1.5">
+                <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider">Support Pitch Message</label>
+                <Input
+                  value={settings.buy_coffee_message || ''}
+                  onChange={(e) => setSettings({ ...settings, buy_coffee_message: e.target.value })}
+                  className="h-11 shadow-inner focus:ring-amber-500/20 focus:border-amber-500 text-sm font-bold"
+                />
+              </div>
             </div>
           </CardContent>
 
-          <CardFooter className="flex justify-end">
+          <CardFooter className="flex justify-end bg-slate-50/50 border-t border-slate-100 p-5 mt-4">
             <Button
               type="submit"
               variant="primary"
               size="md"
               loading={saving}
               icon={<Save className="w-4 h-4" />}
+              className="bg-gradient-to-r from-brand-500 to-brand-600 hover:from-brand-600 hover:to-brand-700 shadow-glow-brand font-bold px-6"
             >
               Save Configuration Settings
             </Button>

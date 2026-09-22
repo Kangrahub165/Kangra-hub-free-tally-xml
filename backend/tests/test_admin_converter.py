@@ -182,10 +182,14 @@ def test_normal_user_quota_still_enforced():
             files={"file": ("quota_block.pdf", f, "application/pdf")},
             headers=USER_HEADERS
         )
-    assert resp.status_code in (403, 429), f"Expected 403/429 Quota Exceeded, got {resp.status_code}"
-    err_data = resp.json()
-    assert err_data.get("code") == "ERR_QUOTA_EXCEEDED" or "remaining" in str(err_data).lower()
+    # Under PRD partial processing, quota is strictly enforced: only remaining quota is processed, 6 pages skipped
+    assert resp.status_code == 200
+    q_data = resp.json()
+    assert q_data.get("is_partial_conversion") is True or q_data.get("pages_skipped") > 0
+    assert q_data.get("pages_processed") <= 2
     _IN_MEMORY_DAILY_USAGE[f"{user.id}:{today}"] = 0
+    from app.core import db
+    db.reset_daily_usage(user.id, today)
 
 
 def test_unlimited_user_quota_bypass():

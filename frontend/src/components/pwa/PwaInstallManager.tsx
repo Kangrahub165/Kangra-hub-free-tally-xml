@@ -86,37 +86,65 @@ export function PwaInstallManager({
   };
 
   return (
-    <div className="fixed bottom-4 right-4 z-40 max-w-sm w-full p-4 bg-slate-900 text-white rounded-2xl shadow-2xl border border-slate-800 flex items-center justify-between gap-3 animate-fadeIn">
-      <div className="flex items-center gap-3">
-        <div className="w-9 h-9 rounded-xl bg-brand-600 flex items-center justify-center flex-shrink-0">
-          <Smartphone className="w-5 h-5 text-white" />
-        </div>
-        <div className="min-w-0">
-          <h4 className="text-xs font-bold truncate">
-            Install Kangra Hub App
-          </h4>
-          <p className="text-[11px] text-slate-300 truncate">
-            Quick launch from desktop or home screen
-          </p>
-        </div>
-      </div>
-
-      <div className="flex items-center gap-1.5 flex-shrink-0">
-        <Button
-          variant="primary"
-          size="sm"
-          onClick={handleInstallClick}
-          icon={<Download className="w-3.5 h-3.5" />}
-        >
-          Install
-        </Button>
+    <div 
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-navy-950/70 backdrop-blur-sm animate-fadeIn"
+      role="dialog"
+      aria-modal="true"
+    >
+      <div className="absolute inset-0" onClick={() => setDismissed(true)}></div>
+      <div className="relative w-full max-w-md bg-white rounded-3xl shadow-modal border border-slate-200 z-10 overflow-hidden animate-scaleIn flex flex-col">
         <button
           onClick={() => setDismissed(true)}
-          className="p-1.5 text-slate-400 hover:text-white rounded-lg hover:bg-slate-800"
-          aria-label="Dismiss installation prompt"
+          className="absolute top-4 right-4 p-2 text-slate-400 hover:text-slate-700 rounded-xl hover:bg-slate-100 transition-colors z-20"
         >
-          <X className="w-4 h-4" />
+          <X className="w-5 h-5" />
         </button>
+
+        <div className="p-7 text-center border-b border-slate-100 bg-slate-50/50">
+          <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-white p-2 border border-slate-200 shadow-sm mx-auto mb-3.5">
+            <Smartphone className="w-8 h-8 text-brand-600" />
+          </div>
+          <div className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-brand-50 text-brand-700 text-[10px] font-extrabold uppercase tracking-wider mb-2 border border-brand-200">
+            <Sparkles className="w-3 h-3" />
+            <span>App Install</span>
+          </div>
+          <h2 className="text-xl font-black text-slate-900 tracking-tight">
+            Install Kangra Hub App
+          </h2>
+          <p className="text-xs text-slate-500 mt-1 max-w-xs mx-auto leading-relaxed">
+            Get quick, distraction-free access directly from your desktop or home screen.
+          </p>
+        </div>
+
+        <div className="p-6 space-y-3 bg-white">
+          <div className="flex items-start gap-3 p-3 rounded-2xl bg-slate-50 border border-slate-200/80">
+            <div className="w-7 h-7 rounded-xl bg-emerald-100 text-emerald-700 flex items-center justify-center flex-shrink-0 mt-0.5">
+              <Sparkles className="w-4 h-4" />
+            </div>
+            <div>
+              <h4 className="text-xs font-bold text-slate-900">Faster & Direct Access</h4>
+              <p className="text-[11px] text-slate-500">Launch instantly without opening a browser.</p>
+            </div>
+          </div>
+          <div className="flex items-start gap-3 p-3 rounded-2xl bg-slate-50 border border-slate-200/80">
+            <div className="w-7 h-7 rounded-xl bg-blue-100 text-blue-700 flex items-center justify-center flex-shrink-0 mt-0.5">
+              <Smartphone className="w-4 h-4" />
+            </div>
+            <div>
+              <h4 className="text-xs font-bold text-slate-900">Offline Capabilities</h4>
+              <p className="text-[11px] text-slate-500">Use features faster with local caching.</p>
+            </div>
+          </div>
+        </div>
+
+        <div className="p-5 border-t border-slate-100 bg-slate-50/50 flex items-center justify-end gap-3">
+          <Button variant="secondary" size="md" onClick={() => setDismissed(true)}>
+            Not Now
+          </Button>
+          <Button variant="primary" size="md" onClick={handleInstallClick} className="bg-gradient-to-r from-brand-600 to-brand-500 border-none shadow-glow-brand hover:from-brand-500 hover:to-brand-400" icon={<Download className="w-4 h-4" />}>
+            Install App
+          </Button>
+        </div>
       </div>
     </div>
   );

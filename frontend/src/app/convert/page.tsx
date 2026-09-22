@@ -36,7 +36,9 @@ import {
   QrCode,
   Copy,
   ExternalLink,
-  MessageCircle
+  MessageCircle,
+  Clock,
+  FileUp
 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { 
@@ -66,6 +68,8 @@ import {
   getPaymentConfig,
   submitPaymentRequest,
   processRemainingPages,
+  getRecentActiveConversion,
+  getMyPaymentRequests,
   PaymentConfig,
   PaymentRequest
 } from '@/lib/api';
@@ -157,6 +161,12 @@ export default function ConvertPage() {
   const [copiedUpi, setCopiedUpi] = useState(false);
   const [processingRemaining, setProcessingRemaining] = useState(false);
 
+  // Conversion Session Persistence & Pending Payments
+  const [activeRecentJob, setActiveRecentJob] = useState<ConversionJobSummary | null>(null);
+  const [pendingPayments, setPendingPayments] = useState<PaymentRequest[]>([]);
+  const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved'>('idle');
+  const [showNewStatementModal, setShowNewStatementModal] = useState(false);
+
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -168,6 +178,12 @@ export default function ConvertPage() {
     getUserUsage().then(setUsage).catch(() => {});
     getSupportedBanks().then(setSupportedBanks).catch(() => {});
     getPaymentConfig().then(setPaymentConfig).catch(() => {});
+    getRecentActiveConversion().then((recent) => {
+      if (recent && recent.transactions && recent.transactions.length > 0) {
+        setActiveRecentJob(recent);
+      }
+    }).catch(() => {});
+    getMyPaymentRequests().then(setPendingPayments).catch(() => {});
     loadUserLedgers();
     getUserBankConfigs().then((configs) => {
       if (configs['__cash__']) {
@@ -337,6 +353,7 @@ export default function ConvertPage() {
 
     // Sync with backend if job exists
     if (job) {
+      setSaveStatus('saving');
       try {
         const payload: any = {};
         if (field === 'ledger_name') payload.ledger_name = value;
@@ -348,9 +365,12 @@ export default function ConvertPage() {
         
         if (Object.keys(payload).length > 0) {
           await updateTransactionRow(job.id, index, payload, false);
+          setSaveStatus('saved');
+        } else {
+          setSaveStatus('idle');
         }
       } catch {
-        // Local state already updated, will be pushed during review/generate
+        setSaveStatus('idle');
       }
     }
   };
@@ -651,11 +671,7 @@ export default function ConvertPage() {
       }
     } catch (err: any) {
       const msg = err.message || 'Excel generation failed. Please verify transactions and balance math.';
-      if (/not found|404|expired/i.test(msg)) {
-        setErrorMsg('Conversion session expired. Please re-upload your bank statement PDF to generate files.');
-      } else {
-        setErrorMsg(msg);
-      }
+      setErrorMsg(msg);
     } finally {
       setGeneratingExcel(false);
     }
@@ -686,11 +702,7 @@ export default function ConvertPage() {
       }
     } catch (err: any) {
       const msg = err.message || 'XML generation failed. Please verify transactions and balance math.';
-      if (/not found|404|expired/i.test(msg)) {
-        setErrorMsg('Conversion session expired. Please re-upload your bank statement PDF to generate files.');
-      } else {
-        setErrorMsg(msg);
-      }
+      setErrorMsg(msg);
       setCurrentStep(4);
     } finally {
       setGeneratingXml(false);
@@ -737,12 +749,37 @@ export default function ConvertPage() {
       const amount = paymentPages * (paymentConfig?.price_per_page || 2.0);
       await submitPaymentRequest(paymentPages, amount, paymentScreenshot, paymentNotes);
       setPaymentSuccess(true);
+      getMyPaymentRequests().then(setPendingPayments).catch(() => {});
       getUserUsage().then(setUsage).catch(() => {});
     } catch (err: any) {
       setPaymentError(err.message || 'Failed to submit payment request.');
     } finally {
       setSubmittingPayment(false);
     }
+  };
+
+  const handleResumeJob = (resumedJob: any) => {
+    setJob(resumedJob);
+    setTransactions(resumedJob.transactions || []);
+    if (resumedJob.bank_ledger_name) {
+      setBankLedgerName(resumedJob.bank_ledger_name);
+    } else if (resumedJob.bank_name) {
+      setBankLedgerName(`${resumedJob.bank_name} A/C`);
+    }
+    setCurrentStep(4);
+    setSuccessMsg(`Resumed active session: ${resumedJob.file_name || 'Statement'} (${(resumedJob.transactions || []).length} transactions).`);
+    setTimeout(() => setSuccessMsg(''), 5000);
+  };
+
+  const handleConfirmNewStatement = () => {
+    setShowNewStatementModal(false);
+    setCurrentStep(1);
+    setFile(null);
+    setTransactions([]);
+    setJob(null);
+    setXmlResult(null);
+    setExcelResult(null);
+    setActiveRecentJob(null);
   };
 
   const handleProcessRemaining = async () => {
@@ -818,52 +855,53 @@ export default function ConvertPage() {
   });
 
   return (
-    <div className="py-10 bg-slate-50 min-h-screen">
+    <div className="py-10 bg-slate-50 min-h-screen animate-fadeIn">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 space-y-8">
         
         {/* Top Studio Header */}
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-white p-6 sm:p-7 rounded-3xl border border-slate-200 shadow-card">
-          <div className="space-y-1">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-navy-900 text-white p-6 sm:p-7 rounded-3xl border border-navy-800 shadow-glow-brand relative overflow-hidden group">
+          <div className="absolute top-0 right-0 -mr-20 -mt-20 w-64 h-64 rounded-full bg-brand-500/20 blur-3xl pointer-events-none transition-transform duration-700 group-hover:scale-110" />
+          <div className="relative z-10 space-y-1">
             <div className="flex items-center gap-2.5">
-              <h1 className="text-2xl font-black text-slate-900 tracking-tight">
+              <h1 className="text-2xl font-black text-white tracking-tight">
                 Conversion Studio
               </h1>
-              <Badge variant="primary" size="sm">
+              <Badge variant="primary" size="sm" className="bg-brand-500 text-white border-brand-400">
                 Accounting Workspace
               </Badge>
             </div>
-            <p className="text-xs text-slate-500">
+            <p className="text-xs text-navy-200">
               Upload bank statement PDF → Verify transactions & running balance math → Export verified Tally XML
             </p>
           </div>
 
-          <div className="flex flex-wrap items-center gap-3">
+          <div className="relative z-10 flex flex-wrap items-center gap-3">
             {/* Import My Tally Ledgers Quick Button */}
             <Button
-              variant="outline"
+              variant="dark"
               size="sm"
               onClick={() => setIsLedgerModalOpen(true)}
-              icon={<BookOpen className="w-4 h-4 text-blue-600" />}
-              className="border-slate-300 hover:border-blue-500 text-slate-700"
+              icon={<BookOpen className="w-4 h-4 text-brand-400" />}
+              className="border-navy-700 bg-navy-800/60 hover:bg-navy-700 text-white"
             >
               Import My Tally Ledgers
               {userLedgers.length > 0 && (
-                <span className="ml-1.5 px-2 py-0.2 bg-blue-100 text-blue-800 text-[10px] font-bold rounded-full">
+                <span className="ml-1.5 px-2 py-0.2 bg-brand-500/20 text-brand-300 border border-brand-500/30 text-[10px] font-bold rounded-full">
                   {userLedgers.length} Ledgers{userGroups.length > 0 ? ` & ${userGroups.length} Groups` : ''}
                 </span>
               )}
             </Button>
 
             {/* Daily Quota Counter Badge & Buy Pages */}
-            <div className="bg-slate-50 border border-slate-200/80 rounded-2xl px-3.5 py-2 flex items-center gap-2.5">
-              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-              <div className="text-xs font-semibold text-slate-700 flex items-center gap-1.5 flex-wrap">
+            <div className="bg-navy-800/80 border border-navy-700 rounded-2xl px-3.5 py-2 flex items-center gap-2.5 shadow-inner">
+              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse shadow-[0_0_8px_rgba(52,211,153,0.8)]" />
+              <div className="text-xs font-semibold text-navy-100 flex items-center gap-1.5 flex-wrap">
                 <span>Free Daily:</span>
-                <strong className="text-brand-600 font-extrabold tabular-nums">
+                <strong className="text-brand-400 font-extrabold tabular-nums">
                   {usage?.is_unlimited ? 'Unlimited' : `${usage?.pages_remaining_today ?? 50} / ${usage?.daily_limit ?? 50}`}
                 </strong>
                 {usage?.additional_page_balance && usage.additional_page_balance > 0 ? (
-                  <span className="px-2 py-0.5 rounded-full bg-blue-100 text-blue-800 text-[10px] font-bold">
+                  <span className="px-2 py-0.5 rounded-full bg-blue-500/20 border border-blue-500/30 text-blue-300 text-[10px] font-bold">
                     +{usage.additional_page_balance} Extra
                   </span>
                 ) : null}
@@ -872,8 +910,8 @@ export default function ConvertPage() {
                 variant="outline"
                 size="sm"
                 onClick={() => handleOpenPaymentModal(50)}
-                icon={<CreditCard className="w-3.5 h-3.5 text-amber-600" />}
-                className="ml-1 text-[11px] h-7 px-2.5 border-amber-300 bg-amber-50/50 hover:bg-amber-100/70 text-amber-900 font-bold"
+                icon={<CreditCard className="w-3.5 h-3.5 text-amber-400" />}
+                className="ml-1 text-[11px] h-7 px-2.5 border-amber-500/30 bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 font-bold transition-colors"
               >
                 + Buy Pages
               </Button>
@@ -882,7 +920,7 @@ export default function ConvertPage() {
         </div>
 
         {/* 6-Stage Progress Steps */}
-        <Card className="p-4 sm:p-5 shadow-xs overflow-hidden">
+        <Card className="p-4 sm:p-5 shadow-elevated rounded-3xl border-slate-200/80 bg-white relative overflow-hidden animate-slideDown">
           <ProgressSteps
             steps={WORKFLOW_STEPS}
             currentStep={currentStep}
@@ -921,6 +959,52 @@ export default function ConvertPage() {
         {currentStep === 1 && (
           <div className="max-w-3xl mx-auto space-y-6">
             
+            {/* Continue Previous Conversion Recovery Card (PRD #34) */}
+            {activeRecentJob && (
+              <Card className="p-5 border-indigo-200 bg-indigo-50/40 shadow-xs space-y-3">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                  <div className="flex items-start gap-3">
+                    <div className="w-10 h-10 rounded-2xl bg-indigo-100 text-indigo-700 flex items-center justify-center flex-shrink-0 mt-0.5 border border-indigo-200">
+                      <Clock className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-[11px] font-bold uppercase tracking-wider text-indigo-800">In-Progress Session</span>
+                        <Badge variant="primary" size="sm" className="bg-indigo-600 text-white text-[10px]">Resume Available</Badge>
+                      </div>
+                      <h4 className="text-sm font-bold text-slate-900 mt-0.5">{activeRecentJob.file_name || 'Bank Statement PDF'}</h4>
+                      <div className="flex items-center gap-3 text-xs text-slate-600 mt-1">
+                        <span>Bank: <strong className="text-slate-800">{activeRecentJob.bank_name || 'Detected'}</strong></span>
+                        <span>•</span>
+                        <span>Pages: <strong className="text-slate-800">{activeRecentJob.pages_processed || 0} / {activeRecentJob.total_pdf_pages || activeRecentJob.page_count || 0}</strong></span>
+                        <span>•</span>
+                        <span>Txns: <strong className="text-slate-800">{(activeRecentJob.transactions || []).length}</strong></span>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2 self-end sm:self-center">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setActiveRecentJob(null)}
+                      className="text-xs text-slate-600 hover:text-slate-800"
+                    >
+                      Dismiss
+                    </Button>
+                    <Button
+                      variant="primary"
+                      size="sm"
+                      onClick={() => handleResumeJob(activeRecentJob)}
+                      icon={<ArrowRight className="w-3.5 h-3.5" />}
+                      className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs"
+                    >
+                      Continue Conversion
+                    </Button>
+                  </div>
+                </div>
+              </Card>
+            )}
+
             {/* Tally Master Ledgers Pre-Configuration Card */}
             <Card className="p-6 shadow-xs border-blue-100 bg-blue-50/20 space-y-4">
               <div className="flex items-center justify-between">
@@ -1029,12 +1113,13 @@ export default function ConvertPage() {
               onDragOver={handleDrag}
               onDrop={handleDrop}
               onClick={() => fileInputRef.current?.click()}
-              className={`p-10 sm:p-14 rounded-3xl border-2 border-dashed text-center cursor-pointer transition-all bg-white shadow-card ${
+              className={`relative p-10 sm:p-16 rounded-[2rem] border-2 border-dashed text-center cursor-pointer transition-all duration-300 shadow-card overflow-hidden group ${
                 dragActive
-                  ? 'border-brand-500 bg-brand-50/40 scale-[1.005]'
-                  : 'border-slate-300 hover:border-brand-400 hover:bg-slate-50/60'
+                  ? 'border-brand-500 bg-brand-50/40 scale-[1.02] shadow-glow-brand'
+                  : 'border-slate-300 bg-white hover:border-brand-400 hover:bg-slate-50/60 hover:shadow-card-hover'
               }`}
             >
+              <div className="absolute inset-0 bg-gradient-to-br from-brand-50/20 to-transparent pointer-events-none" />
               <input
                 ref={fileInputRef}
                 type="file"
@@ -1042,18 +1127,30 @@ export default function ConvertPage() {
                 className="hidden"
                 onChange={handleFileChange}
               />
-              <div className="w-16 h-16 rounded-2xl bg-brand-50 text-brand-600 flex items-center justify-center mx-auto mb-4 shadow-xs border border-brand-100">
-                <UploadCloud className="w-8 h-8" />
+              <div className={`w-20 h-20 rounded-3xl flex items-center justify-center mx-auto mb-5 shadow-sm border transition-transform duration-500 relative z-10 ${
+                dragActive 
+                  ? 'bg-brand-500 text-white border-brand-400 scale-110' 
+                  : 'bg-brand-50 text-brand-600 border-brand-100 group-hover:scale-110 group-hover:bg-brand-100'
+              }`}>
+                <UploadCloud className={`w-10 h-10 ${dragActive ? 'animate-bounce' : ''}`} />
               </div>
-              <h2 className="text-lg font-bold text-slate-900 mb-1">
-                {file ? file.name : 'Upload Bank Statement PDF'}
+              <h2 className="text-xl font-bold text-slate-900 mb-2 relative z-10 tracking-tight">
+                {file ? (
+                  <span className="text-brand-700 flex items-center justify-center gap-2">
+                    <FileText className="w-5 h-5" /> {file.name}
+                  </span>
+                ) : 'Upload Bank Statement PDF'}
               </h2>
-              <p className="text-xs text-slate-500 max-w-sm mx-auto mb-5 leading-relaxed">
-                Drag and drop your digital statement PDF here, or browse files from your device
+              <p className="text-xs text-slate-500 max-w-sm mx-auto mb-6 leading-relaxed relative z-10">
+                Drag and drop your digital statement PDF here, or <span className="text-brand-600 font-semibold group-hover:underline">browse files</span> from your device
               </p>
               
-              <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-slate-100 text-[11px] font-semibold text-slate-600">
-                Supports 38+ Banks • Up to 25 MB • Max 200 Pages
+              <div className="inline-flex items-center gap-3 px-4 py-2 rounded-xl bg-slate-100/80 text-[11px] font-bold text-slate-600 relative z-10 border border-slate-200 shadow-xs">
+                <span className="flex items-center gap-1.5"><Building2 className="w-3.5 h-3.5 text-slate-400" /> 38+ Banks</span>
+                <span className="w-1 h-1 rounded-full bg-slate-300" />
+                <span className="flex items-center gap-1.5"><Layers className="w-3.5 h-3.5 text-slate-400" /> Up to 25 MB</span>
+                <span className="w-1 h-1 rounded-full bg-slate-300" />
+                <span className="flex items-center gap-1.5"><FileText className="w-3.5 h-3.5 text-slate-400" /> Max 200 Pages</span>
               </div>
             </div>
 
@@ -1270,7 +1367,7 @@ export default function ConvertPage() {
                       Buy {job.total_pdf_pages || job.page_count} Pages (₹{((job.total_pdf_pages || job.page_count) * 2)})
                     </Button>
                     <a
-                      href="https://wa.me/919418250639?text=Hello%2C%20I%20need%20extra%20pages%20for%20my%20bank%20statement%20conversion."
+                      href="https://wa.me/919805987622?text=Hello%2C%20I%20need%20extra%20pages%20for%20my%20bank%20statement%20conversion."
                       target="_blank"
                       rel="noopener noreferrer"
                       className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 transition-colors"
@@ -1297,19 +1394,19 @@ export default function ConvertPage() {
                           Partial Conversion Active
                         </Badge>
                         <span className="text-xs font-bold text-slate-800">
-                          Pages 1 to {job.pages_processed} Converted
+                          {job.pages_processed} of {job.total_pdf_pages || job.page_count} pages processed successfully
                         </span>
                         <span className="text-xs font-semibold text-amber-800 bg-amber-100/80 px-2 py-0.5 rounded-full">
-                          {job.pages_skipped} Pages Skipped (Daily Quota Reached)
+                          {job.remaining_pages || job.pages_skipped} pages pending
                         </span>
                       </div>
                       
                       <h3 className="text-base sm:text-lg font-black text-slate-900 mt-1.5">
-                        Pages 1–{job.pages_processed} of {job.total_pdf_pages || ((job.pages_processed || 0) + (job.pages_skipped || 0))} Ready for Export
+                        {job.pages_processed} of {job.total_pdf_pages || job.page_count} Pages Processed
                       </h3>
                       
                       <p className="text-xs text-slate-600 mt-1 max-w-2xl leading-relaxed">
-                        You never lose your daily allowance. The first {job.pages_processed} pages have been fully parsed with running balances balanced. The remaining {job.pages_skipped} pages were skipped. You can export these transactions now, or buy extra pages (₹2/page) to seamlessly process the remaining pages.
+                        {job.remaining_pages || job.pages_skipped} pages are pending and have not been processed yet. Pending pages have not been processed and will remain available in this conversion until you purchase/receive page credits.
                       </p>
 
                       <div className="mt-2.5 flex flex-wrap items-center gap-2 text-xs text-slate-600">
@@ -1339,7 +1436,18 @@ export default function ConvertPage() {
                         Process Remaining {job.remaining_pages || job.pages_skipped} Pages
                       </Button>
                     ) : (
-                      <>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <Button
+                          variant="outline"
+                          size="md"
+                          onClick={() => {
+                            const tableElem = document.getElementById('transaction-review-table');
+                            if (tableElem) tableElem.scrollIntoView({ behavior: 'smooth' });
+                          }}
+                          className="font-bold border-slate-300 text-slate-700 hover:bg-slate-50"
+                        >
+                          Continue with Processed Pages
+                        </Button>
                         <Button
                           variant="primary"
                           size="md"
@@ -1347,21 +1455,62 @@ export default function ConvertPage() {
                           icon={<CreditCard className="w-4 h-4" />}
                           className="bg-amber-600 hover:bg-amber-700 text-white font-bold shadow-sm"
                         >
-                          Buy Remaining {job.remaining_pages || job.pages_skipped} Pages (₹{job.suggested_additional_price || ((job.remaining_pages || job.pages_skipped || 0) * 2)})
+                          Purchase Remaining {job.remaining_pages || job.pages_skipped} Pages — ₹{job.suggested_additional_price || ((job.remaining_pages || job.pages_skipped || 0) * 2)}
                         </Button>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={handleProcessRemaining}
-                          loading={processingRemaining}
-                          className="border-slate-300 hover:bg-slate-100 text-slate-700 text-xs"
-                        >
-                          I Already Paid / Process Now
-                        </Button>
-                      </>
+                      </div>
                     )}
                   </div>
                 </div>
+
+                {/* Pending Payment Verification Notice (PRD: Prevent Paid-Page Quota Bypass & Manual WhatsApp Fallback) */}
+                {pendingPayments.some(p => p.status === 'PENDING') && (
+                  <div className="bg-amber-100/70 border border-amber-300 p-4 rounded-2xl text-xs space-y-2.5">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2 font-bold text-amber-950">
+                        <Clock className="w-4 h-4 text-amber-700 animate-pulse" />
+                        <span>Payment Verification In Progress</span>
+                      </div>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={async () => {
+                          try {
+                            const [u, p] = await Promise.all([getUserUsage(), getMyPaymentRequests()]);
+                            setUsage(u);
+                            setPendingPayments(p);
+                            setSuccessMsg('Payment status updated.');
+                            setTimeout(() => setSuccessMsg(''), 3000);
+                          } catch {}
+                        }}
+                        icon={<RefreshCw className="w-3 h-3" />}
+                        className="h-7 text-[11px] border-amber-400 bg-white/80 hover:bg-white text-amber-900 font-bold"
+                      >
+                        Check Status / Refresh
+                      </Button>
+                    </div>
+                    {(() => {
+                      const pReq = pendingPayments.find(p => p.status === 'PENDING');
+                      return pReq ? (
+                        <p className="text-amber-900 leading-relaxed">
+                          Your payment request for <strong>{pReq.requested_pages} pages (₹{pReq.amount_paid})</strong> with Reference: <code className="bg-white/80 px-1.5 py-0.5 rounded font-mono font-bold text-amber-950 border border-amber-300">{pReq.id}</code> has been submitted and is pending administrator verification.
+                        </p>
+                      ) : null;
+                    })()}
+                    <div className="flex flex-wrap items-center gap-3 pt-0.5">
+                      <a
+                        href={`https://wa.me/919805987622?text=${encodeURIComponent(
+                          `Payment Verification Request:\nConversion ID: ${job.id}\nUser: ${job.user_email || job.user_id || 'Kangra Hub User'}\nRequested Pages: ${job.remaining_pages || job.pages_skipped}\nPayment Amount: ₹${job.suggested_additional_price || ((job.remaining_pages || job.pages_skipped || 0) * 2)}\nI have made the UPI transfer and attached screenshot.`
+                        )}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold text-emerald-800 bg-white hover:bg-emerald-50 border border-emerald-300 transition-colors shadow-xs"
+                      >
+                        <MessageCircle className="w-3.5 h-3.5 text-emerald-700" />
+                        Send Payment Screenshot on WhatsApp (9805987622)
+                      </a>
+                    </div>
+                  </div>
+                )}
               </div>
             )}
 
@@ -1434,6 +1583,27 @@ export default function ConvertPage() {
 
                 {/* Ledger Mapping Actions & Import */}
                 <div className="flex items-center gap-2">
+                  {saveStatus === 'saving' && (
+                    <span className="inline-flex items-center gap-1.5 text-[11px] font-semibold text-slate-500 bg-slate-100 px-2.5 py-1.5 rounded-xl animate-pulse">
+                      <RefreshCw className="w-3 h-3 animate-spin text-blue-500" />
+                      Saving...
+                    </span>
+                  )}
+                  {saveStatus === 'saved' && (
+                    <span className="inline-flex items-center gap-1.5 text-[11px] font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2.5 py-1.5 rounded-xl">
+                      <Check className="w-3 h-3 text-emerald-600" />
+                      ✓ All changes saved
+                    </span>
+                  )}
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setShowNewStatementModal(true)}
+                    icon={<FileUp className="w-3.5 h-3.5 text-slate-600" />}
+                    className="border-slate-300 hover:bg-slate-100 text-slate-700"
+                  >
+                    New Statement
+                  </Button>
                   <Button
                     variant="outline"
                     size="sm"
@@ -1905,21 +2075,21 @@ export default function ConvertPage() {
                   </Button>
 
                   <Button
-                    variant="outline"
+                    variant="dark"
                     size="sm"
                     onClick={() => handleAutoResolveFallback(Array.from(selectedRowIndices))}
                     disabled={isBulkAssigning}
-                    className="border-slate-700 text-slate-200 hover:bg-slate-800 text-xs"
+                    className="border-slate-700 bg-slate-800 text-slate-100 hover:bg-slate-700 hover:text-white text-xs"
                   >
                     Auto-Resolve Fallback
                   </Button>
 
                   <Button
-                    variant="outline"
+                    variant="dark"
                     size="sm"
                     onClick={() => handleIgnoreWarnings(Array.from(selectedRowIndices))}
                     disabled={isBulkAssigning}
-                    className="border-slate-700 text-slate-200 hover:bg-slate-800 text-xs"
+                    className="border-slate-700 bg-slate-800 text-slate-100 hover:bg-slate-700 hover:text-white text-xs"
                   >
                     Ignore Warnings
                   </Button>
@@ -1957,7 +2127,7 @@ export default function ConvertPage() {
 
               <div className="overflow-x-auto max-h-[620px] divide-y divide-slate-100">
                 <table className="w-full text-left text-xs border-collapse">
-                  <thead className="bg-slate-100/90 text-slate-600 font-bold uppercase tracking-wider text-[10px] sticky top-0 z-20 border-b border-slate-200 backdrop-blur-xs">
+                  <thead className="bg-white/95 text-navy-700 font-extrabold uppercase tracking-widest text-[10px] sticky top-0 z-20 border-b-2 border-slate-200 backdrop-blur-md shadow-sm">
                     <tr>
                       <th className="px-3 py-3 text-center w-8">
                         <input
@@ -1991,8 +2161,8 @@ export default function ConvertPage() {
                       return (
                         <tr
                           key={tx.id || origIndex}
-                          className={`hover:bg-slate-50/80 transition-colors ${
-                            isSelected ? 'bg-brand-50/30' : isSuspense ? 'bg-amber-50/20' : ''
+                          className={`hover:bg-brand-50/40 transition-all duration-200 group border-b border-transparent hover:border-brand-100 ${
+                            isSelected ? 'bg-brand-50/60 shadow-[inset_3px_0_0_0_rgba(14,165,233,1)]' : isSuspense ? 'bg-amber-50/30' : ''
                           }`}
                         >
                           <td className="px-3 py-2.5 text-center">
@@ -2302,15 +2472,31 @@ export default function ConvertPage() {
                 <p className="text-slate-600">
                   You can download your XML/Excel for the first {job.pages_processed} pages right now. To process the rest of the statement, recharge your account balance at ₹2/page.
                 </p>
-                <Button
-                  variant="primary"
-                  size="sm"
-                  onClick={() => handleOpenPaymentModal(job.remaining_pages || job.pages_skipped)}
-                  icon={<CreditCard className="w-3.5 h-3.5" />}
-                  className="w-full bg-amber-600 hover:bg-amber-700 text-white font-bold"
-                >
-                  Buy Remaining {job.remaining_pages || job.pages_skipped} Pages via UPI
-                </Button>
+                {usage?.additional_page_balance && usage.additional_page_balance >= (job.remaining_pages || job.pages_skipped || 0) ? (
+                  <Button
+                    variant="primary"
+                    size="sm"
+                    onClick={async () => {
+                      await handleProcessRemaining();
+                      setCurrentStep(4);
+                    }}
+                    loading={processingRemaining}
+                    icon={<Sparkles className="w-3.5 h-3.5" />}
+                    className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold"
+                  >
+                    Process Remaining {job.remaining_pages || job.pages_skipped} Pages
+                  </Button>
+                ) : (
+                  <Button
+                    variant="primary"
+                    size="sm"
+                    onClick={() => handleOpenPaymentModal(job.remaining_pages || job.pages_skipped)}
+                    icon={<CreditCard className="w-3.5 h-3.5" />}
+                    className="w-full bg-amber-600 hover:bg-amber-700 text-white font-bold"
+                  >
+                    Buy Remaining {job.remaining_pages || job.pages_skipped} Pages via UPI
+                  </Button>
+                )}
               </div>
             )}
 
@@ -2530,35 +2716,35 @@ export default function ConvertPage() {
           }}
           title="Buy Extra Pages (₹2 / Page)"
           description="Kangra Hub offers manual Google Pay / UPI instant recharge. Your pages never expire."
-          maxWidth="lg"
+          maxWidth="xl"
         >
           {paymentSuccess ? (
-            <div className="text-center py-6 space-y-4">
-              <div className="w-16 h-16 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center mx-auto">
-                <CheckCircle2 className="w-8 h-8" />
+            <div className="text-center py-4 sm:py-6 space-y-4">
+              <div className="w-14 h-14 sm:w-16 sm:h-16 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center mx-auto shadow-xs">
+                <CheckCircle2 className="w-7 h-7 sm:w-8 sm:h-8" />
               </div>
-              <h3 className="text-xl font-bold text-slate-900">Payment Submitted for Approval!</h3>
+              <h3 className="text-lg sm:text-xl font-bold text-slate-900">Payment Submitted for Approval!</h3>
               <p className="text-xs text-slate-600 max-w-md mx-auto leading-relaxed">
                 Thank you! Your payment screenshot for <strong className="text-slate-900">{paymentPages} pages (₹{paymentPages * (paymentConfig?.price_per_page || 2.0)})</strong> has been sent to our verification team.
               </p>
-              <div className="bg-emerald-50 border border-emerald-200 p-4 rounded-2xl text-xs text-emerald-800 text-left space-y-2">
+              <div className="bg-emerald-50 border border-emerald-200 p-3.5 sm:p-4 rounded-2xl text-xs text-emerald-800 text-left space-y-2">
                 <div className="font-bold flex items-center gap-2">
                   <Sparkles className="w-4 h-4 text-emerald-600" />
                   Need Instant Verification?
                 </div>
-                <p>
-                  Send a quick ping on WhatsApp to our verification line at <strong className="font-mono text-emerald-950">+91 9418250639</strong> and our team will approve your balance in minutes.
+                <p className="leading-relaxed">
+                  Send a quick ping on WhatsApp to our verification line at <strong className="font-mono text-emerald-950">+91 9805987622</strong> and our team will approve your balance in minutes.
                 </p>
               </div>
 
-              <div className="flex flex-col sm:flex-row gap-3 pt-3">
+              <div className="flex flex-col sm:flex-row gap-2.5 sm:gap-3 pt-3">
                 <a
-                  href={`https://wa.me/919418250639?text=${encodeURIComponent(
+                  href={`https://wa.me/919805987622?text=${encodeURIComponent(
                     `Hello Kangra Hub Support, I just submitted a payment of ₹${paymentPages * (paymentConfig?.price_per_page || 2.0)} for ${paymentPages} extra pages. Please verify and approve.`
                   )}`}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="flex-1 inline-flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs transition-colors"
+                  className="w-full sm:flex-1 inline-flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs transition-colors shadow-xs"
                 >
                   <MessageCircle className="w-4 h-4" />
                   WhatsApp Direct Verification
@@ -2569,42 +2755,41 @@ export default function ConvertPage() {
                   onClick={() => {
                     setShowPaymentModal(false);
                     setPaymentSuccess(false);
-                    if (job && (job.is_partial_conversion || job.status === 'PARTIALLY_COMPLETED')) {
-                      handleProcessRemaining();
-                    }
+                    getMyPaymentRequests().then(setPendingPayments).catch(() => {});
+                    getUserUsage().then(setUsage).catch(() => {});
                   }}
-                  className="flex-1"
+                  className="w-full sm:flex-1"
                 >
                   Close & Continue
                 </Button>
               </div>
             </div>
           ) : (
-            <form onSubmit={handleSubmitPayment} className="space-y-6 pt-1">
+            <form onSubmit={handleSubmitPayment} className="space-y-5 sm:space-y-6 pt-1">
               {/* Payment Details & QR Code Grid */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6 items-center bg-slate-50 p-5 rounded-2xl border border-slate-200/80">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-6 items-center bg-slate-50 p-4 sm:p-5 rounded-2xl border border-slate-200/80">
                 {/* QR Code Section */}
-                <div className="flex flex-col items-center text-center space-y-2.5">
-                  <div className="p-3 bg-white rounded-2xl border border-slate-200 shadow-xs">
+                <div className="flex flex-col items-center text-center space-y-2">
+                  <div className="p-2.5 sm:p-3 bg-white rounded-2xl border border-slate-200 shadow-xs">
                     <img
                       src="/buy-a-coffee/googlepay_qr.png"
                       alt="Google Pay / UPI QR Code"
-                      className="w-44 h-44 object-contain rounded-xl"
+                      className="w-36 h-36 sm:w-44 sm:h-44 object-contain rounded-xl"
                     />
                   </div>
-                  <span className="text-[11px] font-semibold text-slate-500">
-                    Scan using Google Pay, PhonePe, Paytm, or any UPI App
+                  <span className="text-[11px] font-semibold text-slate-500 max-w-xs">
+                    Scan with Google Pay, PhonePe, Paytm, or any UPI App
                   </span>
                 </div>
 
                 {/* UPI ID & Pricing Details */}
-                <div className="space-y-4">
+                <div className="space-y-3.5">
                   <div>
                     <label className="block text-[11px] font-bold text-slate-600 uppercase tracking-wider mb-1">
                       UPI ID (Copy & Pay)
                     </label>
                     <div className="flex items-center gap-2">
-                      <div className="flex-1 font-mono text-xs font-extrabold text-slate-900 bg-white px-3.5 py-2.5 rounded-xl border border-slate-300">
+                      <div className="flex-1 font-mono text-xs font-extrabold text-slate-900 bg-white px-3 py-2 sm:px-3.5 sm:py-2.5 rounded-xl border border-slate-300 truncate select-all">
                         {paymentConfig?.upi_id || '9418250639@ybl'}
                       </div>
                       <Button
@@ -2613,14 +2798,14 @@ export default function ConvertPage() {
                         size="sm"
                         onClick={handleCopyUpi}
                         icon={copiedUpi ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
-                        className="border-slate-300 text-xs whitespace-nowrap"
+                        className="border-slate-300 text-xs flex-shrink-0"
                       >
                         {copiedUpi ? 'Copied!' : 'Copy'}
                       </Button>
                     </div>
                   </div>
 
-                  <div className="bg-white p-3.5 rounded-xl border border-slate-200 text-xs space-y-2">
+                  <div className="bg-white p-3 sm:p-3.5 rounded-xl border border-slate-200 text-xs space-y-1.5">
                     <div className="flex justify-between text-slate-600">
                       <span>Rate:</span>
                       <strong className="text-slate-900">₹{paymentConfig?.price_per_page || 2.0} per page</strong>
@@ -2630,16 +2815,16 @@ export default function ConvertPage() {
                       <strong className="text-emerald-700">Lifetime (Never Expires)</strong>
                     </div>
                     <div className="flex justify-between text-slate-600">
-                      <span>Priority Verification:</span>
-                      <strong className="text-slate-900 font-mono">+91 9418250639</strong>
+                      <span>Direct Support:</span>
+                      <strong className="text-slate-900 font-mono">+91 9805987622</strong>
                     </div>
                   </div>
                 </div>
               </div>
 
-              {/* Calculator & Form */}
-              <div className="space-y-4">
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              {/* Calculator & Form Fields */}
+              <div className="space-y-3.5 sm:space-y-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
                   <div>
                     <label className="block text-xs font-bold text-slate-700 mb-1">
                       Number of Pages to Buy
@@ -2676,10 +2861,10 @@ export default function ConvertPage() {
                         setPaymentScreenshot(e.target.files[0]);
                       }
                     }}
-                    className="block w-full text-xs text-slate-600 file:mr-3 file:py-2 file:px-3.5 file:rounded-xl file:border-0 file:text-xs file:font-bold file:bg-brand-50 file:text-brand-700 hover:file:bg-brand-100 cursor-pointer border border-slate-300 rounded-xl p-1 bg-white"
+                    className="block w-full text-xs text-slate-600 file:mr-2.5 sm:file:mr-3 file:py-2 file:px-3 sm:file:px-3.5 file:rounded-xl file:border-0 file:text-xs file:font-bold file:bg-brand-50 file:text-brand-700 hover:file:bg-brand-100 cursor-pointer border border-slate-300 rounded-xl p-1 bg-white truncate"
                   />
                   {paymentScreenshot && (
-                    <span className="text-[11px] text-emerald-600 font-semibold mt-1 block">
+                    <span className="text-[11px] text-emerald-600 font-semibold mt-1 block truncate">
                       ✓ Selected: {paymentScreenshot.name} ({(paymentScreenshot.size / 1024).toFixed(1)} KB)
                     </span>
                   )}
@@ -2705,13 +2890,13 @@ export default function ConvertPage() {
                 </div>
               )}
 
-              <div className="flex gap-3 pt-2">
+              <div className="flex flex-col-reverse sm:flex-row gap-2.5 sm:gap-3 pt-2">
                 <Button
                   type="button"
                   variant="outline"
                   size="md"
                   onClick={() => setShowPaymentModal(false)}
-                  className="w-1/3"
+                  className="w-full sm:w-1/3"
                 >
                   Cancel
                 </Button>
@@ -2721,7 +2906,7 @@ export default function ConvertPage() {
                   size="md"
                   loading={submittingPayment}
                   disabled={submittingPayment || !paymentScreenshot}
-                  className="w-2/3 bg-brand-600 hover:bg-brand-700 font-bold"
+                  className="w-full sm:w-2/3 bg-brand-600 hover:bg-brand-700 font-bold"
                   icon={<Check className="w-4 h-4" />}
                 >
                   Submit Payment for Verification
@@ -2729,6 +2914,39 @@ export default function ConvertPage() {
               </div>
             </form>
           )}
+        </Modal>
+
+        {/* Confirm Discard / New Statement Modal (PRD #34) */}
+        <Modal
+          isOpen={showNewStatementModal}
+          onClose={() => setShowNewStatementModal(false)}
+          title="Start New Statement Conversion?"
+          description="Your current statement and ledger mappings will be saved in your history, but the active editor will be reset."
+          maxWidth="sm"
+        >
+          <div className="space-y-4 pt-2">
+            <p className="text-xs text-slate-600 leading-relaxed">
+              Are you sure you want to start a new conversion? You can always resume your most recent session from the upload screen.
+            </p>
+            <div className="flex gap-2.5 pt-2">
+              <Button
+                variant="outline"
+                size="md"
+                className="w-1/2"
+                onClick={() => setShowNewStatementModal(false)}
+              >
+                Keep Editing
+              </Button>
+              <Button
+                variant="primary"
+                size="md"
+                className="w-1/2 bg-rose-600 hover:bg-rose-700 text-white font-bold"
+                onClick={handleConfirmNewStatement}
+              >
+                Start New Statement
+              </Button>
+            </div>
+          </div>
         </Modal>
 
       </div>

@@ -92,8 +92,8 @@ export default function AccountRecoveryPage() {
   };
 
   return (
-    <div className="min-h-[calc(100vh-5rem)] flex items-center justify-center p-4 sm:p-6 bg-slate-50">
-      <div className="max-w-xl w-full bg-white p-6 sm:p-9 rounded-3xl border border-slate-200 shadow-elevated">
+    <div className="min-h-[calc(100vh-5rem)] flex items-center justify-center p-4 sm:p-6 bg-navy-50 gradient-surface">
+      <div className="max-w-xl w-full bg-white glass-card p-6 sm:p-9 rounded-3xl border border-navy-200/60 shadow-modal">
         
         {/* Header */}
         <div className="text-center mb-6">
@@ -103,26 +103,26 @@ export default function AccountRecoveryPage() {
               alt="Kangra Hub"
               width={48}
               height={48}
-              className="mx-auto rounded-2xl shadow-xs"
+              className="mx-auto rounded-2xl shadow-glow-brand"
             />
           </Link>
-          <h1 className="text-2xl font-black text-slate-900 tracking-tight">
+          <h1 className="text-2xl font-black text-navy-900 tracking-tight">
             Account Recovery Assistance
           </h1>
-          <p className="text-xs text-slate-500 mt-1">
+          <p className="text-xs text-navy-500 mt-1">
             Controlled recovery workflow for users who lost access to their registered email and phone.
           </p>
         </div>
 
         {/* Tab Selector */}
-        <div className="flex border-b border-slate-200 mb-6">
+        <div className="flex border-b border-navy-200/60 mb-6">
           <button
             type="button"
             onClick={() => setActiveTab('SUBMIT')}
             className={`flex-1 py-2.5 text-xs font-bold border-b-2 transition-colors ${
               activeTab === 'SUBMIT'
                 ? 'border-brand-600 text-brand-600'
-                : 'border-transparent text-slate-500 hover:text-slate-800'
+                : 'border-transparent text-navy-500 hover:text-navy-800'
             }`}
           >
             Submit Recovery Request
@@ -133,7 +133,7 @@ export default function AccountRecoveryPage() {
             className={`flex-1 py-2.5 text-xs font-bold border-b-2 transition-colors ${
               activeTab === 'TRACK'
                 ? 'border-brand-600 text-brand-600'
-                : 'border-transparent text-slate-500 hover:text-slate-800'
+                : 'border-transparent text-navy-500 hover:text-navy-800'
             }`}
           >
             Track Status
@@ -145,18 +145,18 @@ export default function AccountRecoveryPage() {
           <div>
             {submittedResult ? (
               <div className="text-center py-6 space-y-4">
-                <div className="w-14 h-14 rounded-2xl bg-emerald-100 text-emerald-600 flex items-center justify-center mx-auto shadow-xs">
+                <div className="w-14 h-14 rounded-2xl bg-emerald-100 text-emerald-600 flex items-center justify-center mx-auto shadow-glow-brand">
                   <CheckCircle2 className="w-8 h-8" />
                 </div>
                 <div className="space-y-2">
-                  <h2 className="text-base font-bold text-slate-900">Request Successfully Submitted</h2>
-                  <p className="text-xs text-slate-600 leading-relaxed max-w-sm mx-auto">
+                  <h2 className="text-base font-bold text-navy-900">Request Successfully Submitted</h2>
+                  <p className="text-xs text-navy-600 leading-relaxed max-w-sm mx-auto">
                     {submittedResult.message}
                   </p>
-                  <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl font-mono text-sm font-bold text-slate-800 inline-block">
+                  <div className="p-3 bg-navy-50 gradient-surface border border-navy-200/60 rounded-xl font-mono text-sm font-bold text-navy-800 inline-block">
                     Reference ID: <span className="text-brand-600">{submittedResult.reference_id}</span>
                   </div>
-                  <p className="text-[11px] text-slate-400">
+                  <p className="text-[11px] text-navy-400">
                     Save this reference ID to track your request status anytime on this page.
                   </p>
                 </div>
@@ -236,7 +236,7 @@ export default function AccountRecoveryPage() {
                 </div>
 
                 <div>
-                  <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
+                  <label className="block text-xs font-bold text-navy-700 uppercase tracking-wider mb-1.5">
                     Reason for Recovery <span className="text-rose-500">*</span>
                   </label>
                   <textarea
@@ -245,12 +245,12 @@ export default function AccountRecoveryPage() {
                     placeholder="Describe what happened to your previous contact credentials..."
                     value={reason}
                     onChange={(e) => setReason(e.target.value)}
-                    className="w-full bg-white text-xs text-slate-900 placeholder:text-slate-400 rounded-xl border border-slate-300 p-3 focus:outline-none focus:ring-2 focus:ring-brand-500/20 focus:border-brand-600 resize-none"
+                    className="w-full bg-white text-xs text-navy-900 placeholder:text-navy-400 rounded-xl border border-navy-300/60 p-3 focus:outline-none focus:ring-2 focus:ring-brand-500/20 focus:border-accent-500 focus:ring-accent-500/20 resize-none"
                   />
                 </div>
 
                 <div>
-                  <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
+                  <label className="block text-xs font-bold text-navy-700 uppercase tracking-wider mb-1.5">
                     Identity Verification Details (Optional)
                   </label>
                   <textarea
@@ -258,7 +258,7 @@ export default function AccountRecoveryPage() {
                     placeholder="Any proof or details to help security staff verify your identity..."
                     value={identityInfo}
                     onChange={(e) => setIdentityInfo(e.target.value)}
-                    className="w-full bg-white text-xs text-slate-900 placeholder:text-slate-400 rounded-xl border border-slate-300 p-3 focus:outline-none focus:ring-2 focus:ring-brand-500/20 focus:border-brand-600 resize-none"
+                    className="w-full bg-white text-xs text-navy-900 placeholder:text-navy-400 rounded-xl border border-navy-300/60 p-3 focus:outline-none focus:ring-2 focus:ring-brand-500/20 focus:border-accent-500 focus:ring-accent-500/20 resize-none"
                   />
                 </div>
 
@@ -288,7 +288,7 @@ export default function AccountRecoveryPage() {
                   placeholder="Enter Reference ID (e.g. REC-A1B2C3D4)"
                   value={trackRefId}
                   onChange={(e) => setTrackRefId(e.target.value)}
-                  className="w-full bg-white text-xs text-slate-900 placeholder:text-slate-400 rounded-xl border border-slate-300 px-3.5 py-2.5 focus:outline-none focus:ring-2 focus:ring-brand-500/20 focus:border-brand-600"
+                  className="w-full bg-white text-xs text-navy-900 placeholder:text-navy-400 rounded-xl border border-navy-300/60 px-3.5 py-2.5 focus:outline-none focus:ring-2 focus:ring-brand-500/20 focus:border-accent-500 focus:ring-accent-500/20"
                 />
               </div>
               <Button
@@ -311,13 +311,13 @@ export default function AccountRecoveryPage() {
             )}
 
             {trackResult && (
-              <div className="p-4 bg-slate-50 border border-slate-200 rounded-2xl space-y-3">
+              <div className="p-4 bg-navy-50 gradient-surface border border-navy-200/60 rounded-2xl space-y-3">
                 <div className="flex items-center justify-between">
-                  <span className="text-xs text-slate-500 font-medium">Request Reference</span>
-                  <span className="font-mono text-xs font-bold text-slate-900">{trackResult.reference_id || trackResult.request_reference}</span>
+                  <span className="text-xs text-navy-500 font-medium">Request Reference</span>
+                  <span className="font-mono text-xs font-bold text-navy-900">{trackResult.reference_id || trackResult.request_reference}</span>
                 </div>
                 <div className="flex items-center justify-between">
-                  <span className="text-xs text-slate-500 font-medium">Review Status</span>
+                  <span className="text-xs text-navy-500 font-medium">Review Status</span>
                   <span className={`text-xs font-black uppercase px-2.5 py-0.5 rounded-full ${
                     trackResult.status === 'APPROVED' ? 'bg-emerald-100 text-emerald-800' :
                     trackResult.status === 'REJECTED' ? 'bg-rose-100 text-rose-800' :
@@ -327,13 +327,13 @@ export default function AccountRecoveryPage() {
                   </span>
                 </div>
                 {trackResult.decision_reason && (
-                  <div className="pt-2 border-t border-slate-200 text-xs">
-                    <span className="font-bold text-slate-700">Staff Note: </span>
-                    <span className="text-slate-600">{trackResult.decision_reason}</span>
+                  <div className="pt-2 border-t border-navy-200/60 text-xs">
+                    <span className="font-bold text-navy-700">Staff Note: </span>
+                    <span className="text-navy-600">{trackResult.decision_reason}</span>
                   </div>
                 )}
                 {trackResult.reviewed_at && (
-                  <div className="text-[11px] text-slate-400">
+                  <div className="text-[11px] text-navy-400">
                     Reviewed on: {new Date(trackResult.reviewed_at).toLocaleString('en-IN')}
                   </div>
                 )}
@@ -342,10 +342,10 @@ export default function AccountRecoveryPage() {
           </div>
         )}
 
-        <div className="text-center pt-5 mt-6 border-t border-slate-100">
+        <div className="text-center pt-5 mt-6 border-t border-navy-100">
           <Link
             href="/login"
-            className="text-xs font-semibold text-slate-500 hover:text-slate-800 inline-flex items-center gap-1.5 transition-colors"
+            className="text-xs font-semibold text-navy-500 hover:text-navy-800 inline-flex items-center gap-1.5 transition-colors"
           >
             <ArrowLeft className="w-3.5 h-3.5" /> Return to Login
           </Link>

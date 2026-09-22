@@ -128,13 +128,13 @@ export function AdminNotificationBell() {
       {/* Bell Trigger Button */}
       <button
         onClick={() => setIsOpen(!isOpen)}
-        className="relative p-2 rounded-xl text-slate-300 hover:text-white hover:bg-slate-800 transition-colors focus:outline-none focus:ring-2 focus:ring-brand-500/40"
+        className="relative p-2 rounded-xl text-slate-400 hover:text-white hover:bg-white/10 transition-colors focus:outline-none focus:ring-2 focus:ring-accent-500/40"
         aria-label="Admin Notifications"
         title="Admin Notifications Center"
       >
         <Bell className="w-5 h-5" />
         {counts.total_unread > 0 && (
-          <span className="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] px-1 bg-rose-500 text-white font-black text-[10px] rounded-full flex items-center justify-center animate-pulse shadow-sm">
+          <span className="absolute -top-1 -right-1 min-w-[20px] h-[20px] px-1 bg-rose-500 text-white font-black text-[10px] rounded-full flex items-center justify-center animate-pulse shadow-sm border-2 border-navy-950">
             {counts.total_unread > 99 ? '99+' : counts.total_unread}
           </span>
         )}
@@ -142,16 +142,16 @@ export function AdminNotificationBell() {
 
       {/* Popover Dropdown */}
       {isOpen && (
-        <div className="absolute right-0 mt-2.5 w-80 sm:w-96 bg-white rounded-2xl shadow-2xl border border-slate-200 z-50 overflow-hidden animate-fadeIn">
+        <div className="absolute right-0 mt-3 w-80 sm:w-96 bg-white rounded-2xl shadow-modal border border-slate-200 z-50 overflow-hidden animate-slideDown">
           {/* Header */}
-          <div className="p-4 bg-slate-900 text-white flex items-center justify-between">
+          <div className="p-4 bg-navy-950 text-white flex items-center justify-between">
             <div className="flex items-center gap-2">
-              <Bell className="w-4 h-4 text-brand-400" />
+              <Bell className="w-4 h-4 text-accent-400" />
               <span className="text-xs font-bold uppercase tracking-wider">
                 Admin Notifications
               </span>
               {counts.total_unread > 0 && (
-                <span className="bg-rose-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full">
+                <span className="bg-rose-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full shadow-sm">
                   {counts.total_unread} new
                 </span>
               )}
@@ -159,7 +159,7 @@ export function AdminNotificationBell() {
             {counts.total_unread > 0 && (
               <button
                 onClick={handleMarkAllRead}
-                className="text-[11px] text-slate-300 hover:text-white font-semibold flex items-center gap-1 transition-colors"
+                className="text-[11px] text-navy-300 hover:text-white font-semibold flex items-center gap-1 transition-colors"
                 title="Mark all notifications as read"
               >
                 <CheckCheck className="w-3.5 h-3.5 text-emerald-400" />
@@ -242,8 +242,8 @@ export function AdminNotificationBell() {
                 <div
                   key={item.id}
                   onClick={() => handleItemClick(item)}
-                  className={`p-3.5 hover:bg-slate-50 cursor-pointer transition-colors flex items-start gap-3 ${
-                    !item.is_read ? 'bg-brand-50/40' : ''
+                  className={`p-3.5 hover:bg-navy-50/50 cursor-pointer transition-colors flex items-start gap-3 border-l-2 ${
+                    !item.is_read ? 'bg-navy-50/80 border-brand-500' : 'border-transparent'
                   }`}
                 >
                   <div className="mt-0.5 p-1.5 rounded-lg bg-slate-100 flex-shrink-0">

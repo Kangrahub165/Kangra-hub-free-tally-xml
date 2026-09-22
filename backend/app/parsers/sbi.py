@@ -50,7 +50,13 @@ class SBIParser(BaseStatementParser):
         # 2. Try structured vector table extraction first
         if doc.file_path:
             try:
-                raw_rows = extract_structured_table_rows(doc.file_path, doc.password)
+                raw_rows = extract_structured_table_rows(
+                    doc.file_path,
+                    doc.password,
+                    start_page=getattr(doc, "start_page", 1),
+                    max_pages=getattr(doc, "max_pages", None),
+                    allowed_page_numbers=getattr(doc, "page_numbers", None)
+                )
                 if raw_rows:
                     for r in raw_rows:
                         tx_date = normalize_date(r.date_str)
@@ -258,15 +264,17 @@ class SBIParser(BaseStatementParser):
         statement_to: Optional[date] = None
         previous_balance: Optional[Decimal] = None
 
-        all_lines: List[str] = []
+        all_line_entries: List[Tuple[str, int]] = []
         for page in doc.pages:
-            all_lines.extend(page.lines)
+            p_num = getattr(page, "page_number", 1)
+            for line in page.lines:
+                all_line_entries.append((line, p_num))
 
         in_table = False
         date_pattern = re.compile(r'^(\d{1,2}[/\-\.]\d{1,2}[/\-\.]\d{2,4})\b')
 
         current_tx = None
-        for line in all_lines:
+        for line, p_num in all_line_entries:
             upper = line.upper()
             if not in_table:
                 if "DATE" in upper and ("WITHDRAWAL" in upper or "DEPOSIT" in upper or "PARTICULARS" in upper):
@@ -303,7 +311,8 @@ class SBIParser(BaseStatementParser):
                             statement_to = item.date
                 current_tx = {
                     "raw_date": m.group(1),
-                    "lines": [line[m.end():].strip()]
+                    "lines": [line[m.end():].strip()],
+                    "source_page": p_num
                 }
             elif current_tx:
                 current_tx["lines"].append(line)
@@ -408,6 +417,7 @@ class SBIParser(BaseStatementParser):
             credit=credit,
             balance=balance,
             voucher_type=voucher_type,
+            source_page=tx_dict.get("source_page"),
             validation_status="VALID"
         )
         return tx, updated_balance

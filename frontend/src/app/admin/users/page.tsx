@@ -260,7 +260,7 @@ export default function AdminUsersPage() {
             description={search ? `No accounts matched "${search}".` : 'No registered users in the database yet.'}
           />
         ) : (
-          <Table>
+          <div className="overflow-x-auto">\n<Table>
             <TableHeader>
               <tr>
                 <TableHead>User Profile</TableHead>
@@ -397,7 +397,7 @@ export default function AdminUsersPage() {
                 );
               })}
             </TableBody>
-          </Table>
+          </Table>\n</div>
         )}
       </Card>
 
@@ -558,13 +558,13 @@ export default function AdminUsersPage() {
             </div>
 
             {/* Daily Free Page Quota Management (PRD Sections 20 & 21) */}
-            <div className="p-4.5 bg-slate-50 rounded-2xl border border-slate-200 space-y-3.5">
+            <div className="p-5 bg-gradient-to-br from-slate-50 to-white rounded-2xl border border-slate-200 shadow-sm space-y-4">
               <div className="flex items-center justify-between">
                 <div>
-                  <h4 className="text-xs font-bold uppercase tracking-wider text-slate-900">
+                  <h4 className="text-sm font-bold tracking-tight text-navy-900">
                     Daily Free Page Quota Control
                   </h4>
-                  <p className="text-[11px] text-slate-500 mt-0.5">
+                  <p className="text-[11px] text-slate-500 mt-1">
                     Configure whether this user operates on the Global Free Daily Quota or an individual override
                   </p>
                 </div>
@@ -573,42 +573,42 @@ export default function AdminUsersPage() {
                 </Badge>
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-1">
-                <div className="space-y-2">
-                  <label className="text-xs font-semibold text-slate-700 block">Quota Selection Mode:</label>
-                  <div className="space-y-2">
-                    <label className="flex items-center gap-2.5 text-xs text-slate-700 cursor-pointer select-none">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 pt-2">
+                <div className="space-y-3">
+                  <label className="text-xs font-semibold text-slate-700 block uppercase tracking-wider">Quota Selection Mode</label>
+                  <div className="space-y-3">
+                    <label className={`flex items-center gap-3 p-3 rounded-xl border cursor-pointer transition-all ${quotaMode === 'GLOBAL' ? 'border-brand-500 bg-brand-50/50 shadow-sm' : 'border-slate-200 hover:border-brand-300'}`}>
                       <input
                         type="radio"
                         name="quotaMode"
                         value="GLOBAL"
                         checked={quotaMode === 'GLOBAL'}
                         onChange={() => setQuotaMode('GLOBAL')}
-                        className="text-brand-600 focus:ring-brand-500 w-3.5 h-3.5"
+                        className="text-brand-600 focus:ring-brand-500 w-4 h-4"
                       />
-                      <span>Use Global Free Quota ({selectedUser.global_daily_limit || 50} pgs/day)</span>
+                      <span className="text-sm font-medium text-slate-800">Use Global Free Quota <span className="text-slate-500 font-normal">({selectedUser.global_daily_limit || 50} pgs/day)</span></span>
                     </label>
 
-                    <label className="flex items-center gap-2.5 text-xs text-slate-700 cursor-pointer select-none">
+                    <label className={`flex items-center gap-3 p-3 rounded-xl border cursor-pointer transition-all ${quotaMode === 'CUSTOM' ? 'border-brand-500 bg-brand-50/50 shadow-sm' : 'border-slate-200 hover:border-brand-300'}`}>
                       <input
                         type="radio"
                         name="quotaMode"
                         value="CUSTOM"
                         checked={quotaMode === 'CUSTOM'}
                         onChange={() => setQuotaMode('CUSTOM')}
-                        className="text-brand-600 focus:ring-brand-500 w-3.5 h-3.5"
+                        className="text-brand-600 focus:ring-brand-500 w-4 h-4"
                       />
-                      <span>Custom Per-User Quota</span>
+                      <span className="text-sm font-medium text-slate-800">Custom Per-User Quota</span>
                     </label>
                   </div>
                 </div>
 
                 {quotaMode === 'CUSTOM' && (
-                  <div className="space-y-1.5">
-                    <label className="text-xs font-semibold text-slate-700 block">
-                      Custom Daily Pages Allowance:
+                  <div className="space-y-2 animate-fadeIn">
+                    <label className="text-xs font-semibold text-slate-700 block uppercase tracking-wider">
+                      Custom Daily Pages Allowance
                     </label>
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 mt-2">
                       <input
                         type="number"
                         min={1}
@@ -616,21 +616,22 @@ export default function AdminUsersPage() {
                         value={customQuotaValue}
                         onChange={(e) => setCustomQuotaValue(Number(e.target.value))}
                         placeholder="e.g. 200"
-                        className="w-32 px-3 py-1.5 bg-white border border-slate-300 rounded-xl text-xs font-bold text-slate-900 focus:outline-none focus:ring-2 focus:ring-brand-500/20 focus:border-brand-600"
+                        className="w-full sm:w-40 px-4 py-2.5 bg-white border border-slate-300 rounded-xl text-sm font-bold text-slate-900 focus:outline-none focus:ring-2 focus:ring-brand-500/20 focus:border-brand-600 shadow-inner transition-all"
                       />
                       <span className="text-xs text-slate-500 font-medium">Pages / Day</span>
                     </div>
-                    <span className="text-[11px] text-slate-400 block">Overrides global quota for this specific user</span>
+                    <span className="text-[11px] text-slate-400 block mt-2">Overrides global quota for this specific user</span>
                   </div>
                 )}
               </div>
 
-              <div className="flex justify-end pt-2 border-t border-slate-200/60">
+              <div className="flex justify-end pt-4 border-t border-slate-100">
                 <Button
                   variant="primary"
                   size="sm"
                   loading={savingQuota}
                   onClick={handleSaveUserQuota}
+                  className="shadow-glow-brand"
                 >
                   Save Quota Settings
                 </Button>
@@ -796,54 +797,61 @@ export default function AdminUsersPage() {
         size="md"
       >
         {userToSuspend && (
-          <div className="space-y-4">
-            <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl flex items-start gap-2.5">
-              <AlertTriangle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
-              <div className="text-xs text-amber-800 leading-relaxed">
+          <div className="space-y-5 animate-slideDown">
+            <div className="p-4 bg-amber-50/80 border border-amber-200/60 rounded-2xl flex items-start gap-3 shadow-inner">
+              <AlertTriangle className="w-6 h-6 text-amber-600 shrink-0" />
+              <div className="text-xs text-amber-900 leading-relaxed font-medium">
                 Suspending this user will immediately invalidate active sessions, block further logins, schedule account deletion in 90 days, and dispatch an automated suspension email.
               </div>
             </div>
 
-            <div className="bg-slate-50 p-3 rounded-xl border border-slate-200 text-xs">
-              <div className="text-slate-500">Target User:</div>
-              <div className="font-bold text-slate-800 text-sm mt-0.5">{userToSuspend.full_name || 'User'}</div>
-              <div className="font-mono text-slate-600">{userToSuspend.email}</div>
+            <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200 text-xs shadow-sm flex items-center justify-between">
+              <div>
+                <div className="text-slate-500 uppercase tracking-wider font-semibold mb-1">Target User</div>
+                <div className="font-bold text-navy-900 text-base">{userToSuspend.full_name || 'User'}</div>
+                <div className="font-mono text-slate-600 mt-0.5">{userToSuspend.email}</div>
+              </div>
+              <div className="w-12 h-12 rounded-full bg-slate-200 flex items-center justify-center border-2 border-white shadow-sm">
+                <UserCheck className="w-5 h-5 text-slate-500" />
+              </div>
             </div>
 
-            <div className="space-y-1.5">
-              <label className="text-xs font-bold text-slate-700 block">
+            <div className="space-y-2">
+              <label className="text-xs font-bold text-slate-700 block uppercase tracking-wider">
                 Reason for Suspension <span className="text-rose-500">*</span>
               </label>
               <textarea
-                rows={3}
+                rows={4}
                 value={suspendReasonInput}
                 onChange={(e) => setSuspendReasonInput(e.target.value)}
                 placeholder="Specify the policy violation or reason..."
-                className="w-full px-3 py-2 bg-white border border-slate-300 rounded-xl text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-rose-500/20 focus:border-rose-600"
+                className="w-full px-4 py-3 bg-white border border-slate-300 rounded-2xl text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-rose-500/20 focus:border-rose-600 shadow-inner transition-all resize-none"
               />
-              <span className="text-[11px] text-slate-400">
+              <span className="text-[11px] text-slate-400 font-medium block">
                 This reason will be visible to the user on their suspended portal and in their notification email.
               </span>
             </div>
 
-            <div className="flex justify-end gap-2.5 pt-3 border-t border-slate-200">
+            <div className="flex justify-end gap-3 pt-4 border-t border-slate-100">
               <Button
                 variant="outline"
-                size="sm"
+                size="md"
                 onClick={() => {
                   setIsSuspendModalOpen(false);
                   setUserToSuspend(null);
                 }}
+                className="hover:bg-slate-100"
               >
                 Cancel
               </Button>
               <Button
                 variant="danger"
-                size="sm"
+                size="md"
                 loading={suspendingUser}
                 disabled={!suspendReasonInput.trim()}
                 onClick={handleConfirmSuspend}
-                icon={<Ban className="w-3.5 h-3.5" />}
+                icon={<Ban className="w-4 h-4" />}
+                className="shadow-glow-brand"
               >
                 Confirm Suspension
               </Button>

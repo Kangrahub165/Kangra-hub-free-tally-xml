@@ -95,7 +95,7 @@ function AdminResetPasswordForm() {
       <div className="relative w-full max-w-md">
         {/* Header Branding */}
         <div className="text-center mb-6 space-y-2">
-          <div className="inline-flex items-center justify-center w-14 h-14 rounded-2xl bg-gradient-to-tr from-brand-600 to-purple-600 text-white shadow-lg shadow-brand-500/20 mb-2 border border-white/10">
+          <div className="inline-flex items-center justify-center w-14 h-14 rounded-2xl bg-gradient-to-tr from-brand-600 to-purple-600 text-white shadow-elevated shadow-brand-500/20 mb-2 border border-white/10">
             <KeyRound className="w-7 h-7" />
           </div>
           <div className="flex items-center justify-center gap-2">
@@ -111,7 +111,7 @@ function AdminResetPasswordForm() {
         </div>
 
         {/* Card */}
-        <div className="bg-slate-900/90 backdrop-blur-xl border border-slate-800 rounded-3xl p-6 sm:p-8 shadow-2xl shadow-black/60 space-y-5">
+        <div className="bg-slate-900/90 backdrop-blur-xl border border-slate-800 rounded-3xl p-6 sm:p-8 shadow-2xl shadow-black/60 space-y-5 animate-slideUp">
           {error && (
             <StatusAlert
               type="error"
@@ -160,7 +160,7 @@ function AdminResetPasswordForm() {
                     placeholder="Enter at least 8 characters"
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
-                    className="w-full bg-slate-800 border border-slate-700 text-white placeholder:text-slate-500 rounded-xl pl-10 pr-10 py-2.5 text-sm font-medium transition-all focus:outline-none focus:ring-2 focus:ring-brand-500/30 focus:border-brand-500"
+                    className="w-full bg-slate-800 border border-slate-700 text-white placeholder:text-slate-400 rounded-xl pl-10 pr-10 py-2.5 text-sm font-medium transition-all focus:outline-none focus:ring-2 focus:ring-brand-500/30 focus:border-brand-500"
                     autoComplete="new-password"
                     style={{ colorScheme: 'dark', backgroundColor: '#1e293b', color: '#ffffff' }}
                   />
@@ -189,7 +189,7 @@ function AdminResetPasswordForm() {
                     placeholder="Re-enter your new password"
                     value={confirmPassword}
                     onChange={(e) => setConfirmPassword(e.target.value)}
-                    className="w-full bg-slate-800 border border-slate-700 text-white placeholder:text-slate-500 rounded-xl pl-10 pr-4 py-2.5 text-sm font-medium transition-all focus:outline-none focus:ring-2 focus:ring-brand-500/30 focus:border-brand-500"
+                    className="w-full bg-slate-800 border border-slate-700 text-white placeholder:text-slate-400 rounded-xl pl-10 pr-4 py-2.5 text-sm font-medium transition-all focus:outline-none focus:ring-2 focus:ring-brand-500/30 focus:border-brand-500"
                     autoComplete="new-password"
                     style={{ colorScheme: 'dark', backgroundColor: '#1e293b', color: '#ffffff' }}
                   />
@@ -200,7 +200,7 @@ function AdminResetPasswordForm() {
                 type="submit"
                 variant="primary"
                 size="md"
-                className="w-full mt-2 bg-gradient-to-r from-brand-600 to-purple-600 hover:from-brand-500 hover:to-purple-500 text-white shadow-md shadow-brand-600/30"
+                className="w-full mt-2 bg-gradient-to-r from-brand-600 to-purple-600 hover:from-brand-500 hover:to-purple-500 text-white shadow-card shadow-brand-600/30"
                 loading={loading}
                 iconRight={<ArrowRight className="w-4 h-4" />}
               >

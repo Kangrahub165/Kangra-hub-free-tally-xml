@@ -21,7 +21,7 @@ export function TableHeader({
 }: React.HTMLAttributes<HTMLTableSectionElement>) {
   return (
     <thead
-      className={`bg-slate-50/90 text-slate-600 font-bold uppercase tracking-wider text-[11px] border-b border-slate-200 sticky top-0 z-10 backdrop-blur-xs ${className}`}
+      className={`bg-slate-50/80 text-slate-600 font-bold uppercase tracking-widest text-[10px] border-b border-slate-200 sticky top-0 z-10 backdrop-blur-xs ${className}`}
       {...props}
     >
       {children}
@@ -48,7 +48,7 @@ export function TableRow({
 }: React.HTMLAttributes<HTMLTableRowElement>) {
   return (
     <tr
-      className={`hover:bg-slate-50/80 transition-colors ${className}`}
+      className={`hover:bg-brand-50/30 transition-colors ${className}`}
       {...props}
     >
       {children}

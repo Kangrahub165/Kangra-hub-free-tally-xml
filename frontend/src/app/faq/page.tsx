@@ -74,18 +74,18 @@ export default function FAQPage() {
   return (
     <>
       <JsonLd type="FAQPage" faqs={ALL_FAQS} />
-      <div className="py-16 bg-slate-50 min-h-screen">
-        <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8">
+      <div className="py-16 bg-navy-50 gradient-surface min-h-screen">
+        <div className="max-w-4xl animate-fadeIn mx-auto px-4 sm:px-6 lg:px-8">
           
           {/* Header */}
           <div className="text-center mb-10">
             <Badge variant="primary" size="sm" className="mb-3">
               Knowledge Base
             </Badge>
-            <h1 className="text-3xl sm:text-4xl font-extrabold text-slate-900 tracking-tight">
+            <h1 className="text-3xl sm:text-4xl font-extrabold text-navy-900 tracking-tight">
               Frequently Asked Questions
             </h1>
-            <p className="mt-3 text-sm text-slate-600 max-w-lg mx-auto leading-relaxed">
+            <p className="mt-3 text-sm text-navy-600 max-w-lg mx-auto leading-relaxed">
               Clear answers regarding bank PDF statement conversions, Tally XML import specs, daily page allowances, and privacy guarantees.
             </p>
 
@@ -103,8 +103,8 @@ export default function FAQPage() {
                   onClick={() => setActiveCategory(c.id as any)}
                   className={`px-3.5 py-1.5 rounded-xl text-xs font-semibold transition-all ${
                     activeCategory === c.id
-                      ? 'bg-slate-900 text-white shadow-xs'
-                      : 'bg-white text-slate-600 border border-slate-200 hover:border-slate-300'
+                      ? 'bg-navy-900 text-white shadow-glow-brand'
+                      : 'bg-white text-navy-600 border border-navy-200/60 hover:border-navy-300/60'
                   }`}
                 >
                   {c.label}
@@ -120,7 +120,7 @@ export default function FAQPage() {
               return (
                 <Card
                   key={i}
-                  className="border border-slate-200/90 overflow-hidden transition-all duration-150"
+                  className="border border-navy-200/60/90 overflow-hidden transition-all duration-150"
                 >
                   <button
                     onClick={() => toggleItem(i)}
@@ -129,19 +129,19 @@ export default function FAQPage() {
                   >
                     <div className="flex items-start gap-3">
                       <HelpCircle className="w-4 h-4 text-brand-600 flex-shrink-0 mt-0.5" />
-                      <span className="text-sm font-bold text-slate-900 leading-snug">
+                      <span className="text-sm font-bold text-navy-900 leading-snug">
                         {faq.question}
                       </span>
                     </div>
                     <ChevronDown
-                      className={`w-4 h-4 text-slate-400 flex-shrink-0 mt-0.5 transition-transform duration-200 ${
-                        isOpen ? 'rotate-180 text-slate-700' : ''
+                      className={`w-4 h-4 text-navy-400 flex-shrink-0 mt-0.5 transition-transform duration-200 ${
+                        isOpen ? 'rotate-180 text-navy-700' : ''
                       }`}
                     />
                   </button>
 
                   {isOpen && (
-                    <div className="px-5 pb-5 pt-0 text-xs text-slate-600 leading-relaxed pl-12 border-t border-slate-50">
+                    <div className="px-5 pb-5 pt-0 text-xs text-navy-600 leading-relaxed pl-12 border-t border-navy-50">
                       {faq.answer}
                     </div>
                   )}
@@ -151,11 +151,11 @@ export default function FAQPage() {
           </div>
 
           {/* Bottom Callout */}
-          <div className="mt-14 text-center bg-white rounded-2xl border border-slate-200 p-8 shadow-card">
-            <h3 className="text-sm font-bold text-slate-900 mb-1">
+          <div className="mt-14 text-center bg-white glass-card rounded-2xl border border-navy-200/60 p-8 shadow-card">
+            <h3 className="text-sm font-bold text-navy-900 mb-1">
               Still have a question or need a new bank format?
             </h3>
-            <p className="text-xs text-slate-500 mb-5 max-w-sm mx-auto">
+            <p className="text-xs text-navy-500 mb-5 max-w-sm mx-auto">
               Our support team reviews customer queries and statement formats regularly.
             </p>
             <div className="flex flex-col sm:flex-row items-center justify-center gap-3">

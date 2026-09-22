@@ -49,7 +49,7 @@ export function Header() {
   ];
 
   return (
-    <header className="sticky top-0 z-40 bg-white/95 backdrop-blur-md border-b border-slate-200/80 shadow-xs transition-colors">
+    <header className="sticky top-0 z-40 glass-header shadow-subtle transition-colors">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex items-center justify-between h-18">
           
@@ -67,10 +67,10 @@ export function Header() {
                 />
               </div>
               <div className="flex flex-col">
-                <span className="font-extrabold text-base tracking-tight text-slate-900 leading-tight">
+                <span className="font-extrabold text-lg tracking-tight text-gradient-brand leading-tight">
                   Kangra Hub
                 </span>
-                <span className="text-[10px] font-bold text-slate-500 tracking-wider uppercase">
+                <span className="text-[10px] font-bold text-navy-500 tracking-wider uppercase">
                   Tally XML Platform
                 </span>
               </div>
@@ -91,17 +91,17 @@ export function Header() {
           </div>
 
           {/* Desktop Navigation */}
-          <nav className="hidden md:flex items-center gap-6" aria-label="Main Navigation">
+          <nav className="hidden md:flex items-center gap-1.5" aria-label="Main Navigation">
             {navLinks.map((link) => {
               const isActive = pathname === link.href;
               return (
                 <Link
                   key={link.href}
                   href={link.href}
-                  className={`text-xs font-semibold transition-colors py-1 ${
+                  className={`px-3 py-1.5 rounded-xl text-xs lg:text-sm font-semibold transition-all duration-150 ${
                     isActive
-                      ? 'text-brand-600 font-bold'
-                      : 'text-slate-600 hover:text-slate-900'
+                      ? 'bg-brand-50 text-brand-700 font-bold shadow-xs'
+                      : 'text-slate-600 hover:text-brand-600 hover:bg-slate-100/80 font-medium'
                   }`}
                 >
                   {link.label}
@@ -141,7 +141,7 @@ export function Header() {
                   </Button>
                 </Link>
                 <Link href="/signup">
-                  <Button variant="primary" size="sm" iconRight={<ArrowRight className="w-3.5 h-3.5" />}>
+                  <Button variant="primary" size="sm" className="bg-gradient-to-r from-brand-600 to-brand-500 hover:from-brand-500 hover:to-brand-400 border-none shadow-glow-brand" iconRight={<ArrowRight className="w-3.5 h-3.5" />}>
                     Get Started Free
                   </Button>
                 </Link>
@@ -165,7 +165,9 @@ export function Header() {
 
       {/* Mobile Drawer Menu */}
       {mobileMenuOpen && (
-        <div className="md:hidden border-t border-slate-200 bg-white/98 backdrop-blur-md px-5 pt-4 pb-6 space-y-4 shadow-lg animate-fadeIn">
+        <div className="fixed inset-0 z-50 flex justify-end md:hidden">
+          <div className="fixed inset-0 bg-navy-950/60 backdrop-blur-sm" onClick={() => setMobileMenuOpen(false)}></div>
+          <div className="relative w-[280px] max-w-[80vw] h-full bg-white shadow-2xl animate-slideInRight flex flex-col pt-6 px-5 pb-6 overflow-y-auto">
           <div className="flex items-center justify-between pb-3 border-b border-slate-100">
             <span className="text-xs text-slate-500 font-medium">Service Mode</span>
             {isFree ? (
@@ -185,10 +187,10 @@ export function Header() {
                 key={link.href}
                 href={link.href}
                 onClick={() => setMobileMenuOpen(false)}
-                className={`block px-3 py-2 rounded-xl text-sm font-semibold transition-colors ${
+                className={`block px-3 py-3 rounded-xl text-sm font-semibold transition-colors ${
                   pathname === link.href
                     ? 'bg-brand-50 text-brand-700 font-bold'
-                    : 'text-slate-700 hover:bg-slate-50'
+                    : 'text-navy-700 hover:bg-navy-50'
                 }`}
               >
                 {link.label}
@@ -251,6 +253,7 @@ export function Header() {
               </>
             )}
           </div>
+        </div>
         </div>
       )}
     </header>

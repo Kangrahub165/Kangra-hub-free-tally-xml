@@ -127,13 +127,13 @@ export function OtpInput({
             onKeyDown={(e) => handleKeyDown(idx, e)}
             onPaste={handlePaste}
             disabled={disabled}
-            className={`${boxSizeClasses} text-center font-bold font-mono rounded-xl sm:rounded-2xl border transition-all outline-none select-all ${
+            className={`${boxSizeClasses} text-center font-bold font-mono rounded-xl sm:rounded-2xl border transition-all duration-200 outline-none select-all ${
               hasError
-                ? 'border-rose-300 bg-rose-50/40 text-rose-700 focus:ring-2 focus:ring-rose-500/20 focus:border-rose-600'
+                ? 'border-rose-300 bg-rose-50/40 text-rose-700 focus:ring-2 focus:ring-rose-500/25 focus:border-rose-500'
                 : digit
-                ? 'border-brand-500 bg-brand-50/20 text-slate-900 shadow-xs focus:ring-2 focus:ring-brand-500/20 focus:border-brand-600'
-                : 'border-slate-300 bg-white text-slate-900 focus:ring-2 focus:ring-brand-500/20 focus:border-brand-600 shadow-xs'
-            } ${disabled ? 'opacity-50 cursor-not-allowed bg-slate-100' : ''}`}
+                ? 'border-brand-500 bg-brand-50/20 text-slate-900 shadow-sm focus:ring-2 focus:ring-brand-500/25 focus:border-brand-500'
+                : 'border-slate-300 bg-white text-slate-900 focus:ring-2 focus:ring-brand-500/25 focus:border-brand-500 shadow-sm hover:border-slate-400'
+            } ${disabled ? 'opacity-40 cursor-not-allowed bg-slate-100' : ''}`}
           />
         );
       })}

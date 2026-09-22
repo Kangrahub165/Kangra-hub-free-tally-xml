@@ -24,17 +24,25 @@ export function StatusAlert({
   }[type];
 
   const icons = {
-    error: <AlertCircle className="w-4 h-4 text-rose-600 flex-shrink-0 mt-0.5" />,
-    warning: <AlertTriangle className="w-4 h-4 text-amber-600 flex-shrink-0 mt-0.5" />,
-    success: <CheckCircle2 className="w-4 h-4 text-emerald-600 flex-shrink-0 mt-0.5" />,
-    info: <Info className="w-4 h-4 text-brand-600 flex-shrink-0 mt-0.5" />,
+    error: <AlertCircle className="w-5 h-5 text-rose-600 flex-shrink-0" />,
+    warning: <AlertTriangle className="w-5 h-5 text-amber-600 flex-shrink-0" />,
+    success: <CheckCircle2 className="w-5 h-5 text-emerald-600 flex-shrink-0" />,
+    info: <Info className="w-5 h-5 text-brand-600 flex-shrink-0" />,
+  }[type];
+
+  const barColors = {
+    error: 'bg-rose-500',
+    warning: 'bg-amber-500',
+    success: 'bg-emerald-500',
+    info: 'bg-brand-500',
   }[type];
 
   return (
     <div
       role="alert"
-      className={`p-4 rounded-xl border flex items-start gap-3 text-xs leading-relaxed shadow-xs ${styles} ${className}`}
+      className={`relative overflow-hidden p-4 pl-5 rounded-xl border flex items-start gap-3 text-xs leading-relaxed shadow-xs ${styles} ${className}`}
     >
+      <div className={`absolute left-0 top-0 w-1 h-full ${barColors}`} />
       {icons}
       <div className="flex-1">
         {title && <h4 className="font-bold mb-0.5">{title}</h4>}

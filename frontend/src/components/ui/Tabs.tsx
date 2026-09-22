@@ -60,17 +60,17 @@ export function Tabs({
   }
 
   return (
-    <div className={`inline-flex p-1 bg-slate-100/90 rounded-xl border border-slate-200/80 gap-1 ${className}`}>
+    <div className={`inline-flex p-1 bg-slate-100/90 rounded-xl border border-slate-200/80 gap-1 overflow-x-auto scrollbar-hide max-w-full ${className}`}>
       {tabs.map((tab) => {
         const isActive = tab.id === activeTab;
         return (
           <button
             key={tab.id}
             onClick={() => onChange(tab.id)}
-            className={`flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all ${
+            className={`flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all duration-200 whitespace-nowrap ${
               isActive
-                ? 'bg-white text-slate-900 shadow-xs'
-                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/50'
+                ? 'bg-white text-brand-900 shadow-sm'
+                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/60'
             }`}
           >
             {tab.icon}

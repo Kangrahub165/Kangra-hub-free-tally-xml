@@ -37,27 +37,27 @@ export default function TermsPage() {
   ];
 
   return (
-    <div className="py-16 bg-slate-50 min-h-screen">
-      <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8">
+    <div className="py-16 bg-navy-50 gradient-surface min-h-screen">
+      <div className="max-w-4xl animate-fadeIn mx-auto px-4 sm:px-6 lg:px-8">
         
         {/* Header */}
         <div className="text-center mb-12">
           <Badge variant="neutral" size="sm" className="mb-3">
             Legal & Compliance
           </Badge>
-          <h1 className="text-3xl sm:text-4xl font-extrabold text-slate-900 tracking-tight">
+          <h1 className="text-3xl sm:text-4xl font-extrabold text-navy-900 tracking-tight">
             Terms & Conditions of Service
           </h1>
-          <p className="mt-3 text-sm text-slate-600 max-w-xl mx-auto leading-relaxed">
+          <p className="mt-3 text-sm text-navy-600 max-w-xl mx-auto leading-relaxed">
             Please read these terms carefully before converting bank statements on Kangra Hub Free Tally XML.
           </p>
         </div>
 
         <div className="space-y-4">
           {sections.map((sec, idx) => (
-            <Card key={idx} className="p-6 sm:p-7 border border-slate-200/90 shadow-card">
-              <h2 className="text-sm font-bold text-slate-900 mb-2">{sec.title}</h2>
-              <p className="text-xs text-slate-600 leading-relaxed">{sec.content}</p>
+            <Card key={idx} className="p-6 sm:p-7 border border-navy-200/60/90 shadow-card">
+              <h2 className="text-sm font-bold text-navy-900 mb-2">{sec.title}</h2>
+              <p className="text-xs text-navy-600 leading-relaxed">{sec.content}</p>
             </Card>
           ))}
         </div>
