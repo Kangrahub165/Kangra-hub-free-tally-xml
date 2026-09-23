@@ -197,9 +197,7 @@ export interface LedgerImportResult {
   error?: string;
 }
 
-const API_BASE = typeof window !== 'undefined'
-  ? (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api')
-  : 'http://127.0.0.1:8000/api';
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || process.env.BACKEND_URL || 'http://localhost:8000/api';
 
 export function getAuthToken(): string {
   if (typeof window !== 'undefined') {
