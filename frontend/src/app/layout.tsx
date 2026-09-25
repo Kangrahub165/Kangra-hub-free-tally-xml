@@ -73,6 +73,20 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en" className={inter.variable}>
+      <head>
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `
+              window.__pwaDeferredPrompt = null;
+              window.addEventListener('beforeinstallprompt', function(e) {
+                e.preventDefault();
+                window.__pwaDeferredPrompt = e;
+                window.dispatchEvent(new Event('kh:pwa-prompt-ready'));
+              });
+            `,
+          }}
+        />
+      </head>
       <body className="font-sans antialiased min-h-screen flex flex-col justify-between">
         <Header />
         <main className="flex-1">{children}</main>

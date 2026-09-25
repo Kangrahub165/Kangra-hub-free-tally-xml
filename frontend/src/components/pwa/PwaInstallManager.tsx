@@ -50,14 +50,31 @@ export function PwaInstallManager({
       }
     }
 
+    // Check if already captured globally on window
+    if (typeof window !== 'undefined' && (window as any).__pwaDeferredPrompt) {
+      setDeferredPrompt((window as any).__pwaDeferredPrompt);
+    }
+
     // Capture install prompt event
     const handleBeforeInstallPrompt = (e: Event) => {
       e.preventDefault();
+      (window as any).__pwaDeferredPrompt = e;
       setDeferredPrompt(e as BeforeInstallPromptEvent);
+      window.dispatchEvent(new Event('kh:pwa-prompt-ready'));
+    };
+
+    const handlePromptReady = () => {
+      if (typeof window !== 'undefined' && (window as any).__pwaDeferredPrompt) {
+        setDeferredPrompt((window as any).__pwaDeferredPrompt);
+      }
     };
 
     window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
-    return () => window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+    window.addEventListener('kh:pwa-prompt-ready', handlePromptReady);
+    return () => {
+      window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+      window.removeEventListener('kh:pwa-prompt-ready', handlePromptReady);
+    };
   }, [mode]);
 
   // STRICT REQUIREMENT: Admin PWA install prompt is exclusively managed by AdminPwaInstall in Admin Header!

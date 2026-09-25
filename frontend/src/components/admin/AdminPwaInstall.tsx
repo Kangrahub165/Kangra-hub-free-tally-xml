@@ -40,23 +40,41 @@ export function AdminPwaInstall({ variant = 'header', onAction }: AdminPwaInstal
       });
     }
 
+    // Check if prompt was already captured earlier on window
+    if (typeof window !== 'undefined' && (window as any).__pwaDeferredPrompt) {
+      setDeferredPrompt((window as any).__pwaDeferredPrompt);
+    }
+
     // Capture install prompt event
     const handleBeforeInstallPrompt = (e: Event) => {
       e.preventDefault();
+      (window as any).__pwaDeferredPrompt = e;
       setDeferredPrompt(e as BeforeInstallPromptEvent);
+      window.dispatchEvent(new Event('kh:pwa-prompt-ready'));
+    };
+
+    const handlePromptReady = () => {
+      if (typeof window !== 'undefined' && (window as any).__pwaDeferredPrompt) {
+        setDeferredPrompt((window as any).__pwaDeferredPrompt);
+      }
     };
 
     const handleAppInstalled = () => {
       setIsInstalled(true);
       setDeferredPrompt(null);
+      if (typeof window !== 'undefined') {
+        (window as any).__pwaDeferredPrompt = null;
+      }
       setIsModalOpen(false);
     };
 
     window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+    window.addEventListener('kh:pwa-prompt-ready', handlePromptReady);
     window.addEventListener('appinstalled', handleAppInstalled);
 
     return () => {
       window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+      window.removeEventListener('kh:pwa-prompt-ready', handlePromptReady);
       window.removeEventListener('appinstalled', handleAppInstalled);
     };
   }, []);
@@ -84,6 +102,9 @@ export function AdminPwaInstall({ variant = 'header', onAction }: AdminPwaInstal
   }
 
   const handleOpenModal = () => {
+    if (typeof window !== 'undefined' && (window as any).__pwaDeferredPrompt) {
+      setDeferredPrompt((window as any).__pwaDeferredPrompt);
+    }
     setIsModalOpen(true);
   };
 
@@ -92,14 +113,18 @@ export function AdminPwaInstall({ variant = 'header', onAction }: AdminPwaInstal
   };
 
   const handleTriggerInstall = async () => {
-    if (!deferredPrompt) return;
+    const prompt = deferredPrompt || (typeof window !== 'undefined' ? (window as any).__pwaDeferredPrompt : null);
+    if (!prompt) return;
     setIsInstalling(true);
     try {
-      await deferredPrompt.prompt();
-      const { outcome } = await deferredPrompt.userChoice;
+      await prompt.prompt();
+      const { outcome } = await prompt.userChoice;
       if (outcome === 'accepted') {
         setIsInstalled(true);
         setDeferredPrompt(null);
+        if (typeof window !== 'undefined') {
+          (window as any).__pwaDeferredPrompt = null;
+        }
         setIsModalOpen(false);
       } else {
         // Dismissed: Close modal gracefully, leave header button available for later
@@ -111,6 +136,8 @@ export function AdminPwaInstall({ variant = 'header', onAction }: AdminPwaInstal
       setIsInstalling(false);
     }
   };
+
+  const activePrompt = deferredPrompt || (typeof window !== 'undefined' ? (window as any).__pwaDeferredPrompt : null);
 
   return (
     <>
@@ -219,7 +246,7 @@ export function AdminPwaInstall({ variant = 'header', onAction }: AdminPwaInstal
 
             {/* Modal Body - Benefits & Fallback Details */}
             <div className="p-6 space-y-4 overflow-y-auto flex-1">
-              {deferredPrompt ? (
+              {activePrompt ? (
                 <div className="space-y-3">
                   <div className="flex items-start gap-3 p-3 rounded-2xl bg-slate-50 border border-slate-200/80">
                     <div className="w-7 h-7 rounded-xl bg-emerald-100 text-emerald-700 flex items-center justify-center flex-shrink-0 mt-0.5">
@@ -263,17 +290,17 @@ export function AdminPwaInstall({ variant = 'header', onAction }: AdminPwaInstal
                   <div className="p-3.5 rounded-2xl bg-amber-50 border border-amber-200 text-xs text-amber-900">
                     <div className="font-bold flex items-center gap-1.5 mb-1 text-amber-800">
                       <HelpCircle className="w-4 h-4 text-amber-600 flex-shrink-0" />
-                      <span>How to install from your browser menu:</span>
+                      <span>How to install from your browser:</span>
                     </div>
-                    <ul className="space-y-2 mt-2 text-[11px] text-amber-900/90 list-disc pl-4 leading-relaxed">
+                    <ul className="space-y-2.5 mt-2 text-[11px] text-amber-900/90 list-disc pl-4 leading-relaxed">
                       <li>
-                        <strong>Google Chrome & Microsoft Edge:</strong> Click the install icon (<strong>⊕</strong>) in the address bar, or open menu <strong>⋮</strong> &rarr; <em>&ldquo;Install Kangra Hub...&rdquo;</em>
+                        <strong>Google Chrome & Microsoft Edge:</strong> Look at the right side of the address bar above and click the install icon (<strong>💻</strong> or <strong>⊕</strong>), or open menu <strong>⋮</strong> &rarr; <em>&ldquo;Install Kangra Hub...&rdquo;</em>
                       </li>
                       <li>
                         <strong>Safari (macOS / iOS):</strong> Click the <strong>Share</strong> icon (<strong>↑</strong>) &rarr; select <em>&ldquo;Add to Dock&rdquo;</em> or <em>&ldquo;Add to Home Screen&rdquo;</em>.
                       </li>
                       <li>
-                        <strong>Firefox:</strong> You can bookmark this page or create a desktop shortcut for one-click access.
+                        <strong>Firefox:</strong> Bookmark this page or add a shortcut to your desktop for one-click access.
                       </li>
                     </ul>
                   </div>
@@ -288,10 +315,10 @@ export function AdminPwaInstall({ variant = 'header', onAction }: AdminPwaInstal
                 size="md"
                 onClick={handleCloseModal}
               >
-                {deferredPrompt ? 'Not Now' : 'Close'}
+                {activePrompt ? 'Not Now' : 'Close'}
               </Button>
 
-              {deferredPrompt && (
+              {activePrompt && (
                 <Button
                   variant="primary"
                   size="md"
