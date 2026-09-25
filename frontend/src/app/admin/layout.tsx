@@ -275,6 +275,10 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
 
         {/* Sidebar Footer */}
         <div className="pt-4 mt-6 border-t border-slate-800/80 space-y-2.5">
+          <AdminPwaInstall 
+            variant="sidebar" 
+            onAction={() => setMobileSidebarOpen(false)} 
+          />
           <Link
             href="/dashboard"
             className="flex items-center gap-2 text-xs font-semibold text-slate-400 hover:text-white transition-colors"
@@ -296,11 +300,11 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
       {/* Main Admin Workspace Area with Top Bar */}
       <div className="flex-1 flex flex-col min-w-0 min-h-screen">
         {/* Sticky Top Header Bar */}
-        <header className="sticky top-0 z-20 glass-header-dark text-white px-4 sm:px-6 py-3 border-b border-navy-800 flex items-center justify-between shadow-subtle">
-          <div className="flex items-center gap-3 min-w-0">
+        <header className="sticky top-0 z-20 glass-header-dark text-white px-3 sm:px-6 py-2.5 sm:py-3 border-b border-navy-800 flex items-center justify-between shadow-subtle gap-2">
+          <div className="flex items-center gap-2 sm:gap-3 min-w-0">
             <button
               onClick={() => setMobileSidebarOpen(true)}
-              className="md:hidden p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-white/10 transition-colors"
+              className="md:hidden p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-white/10 transition-colors flex-shrink-0"
               aria-label="Open sidebar"
             >
               <Menu className="w-5 h-5" />
@@ -309,15 +313,15 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
               <div className="text-[10px] font-bold uppercase tracking-widest text-accent-400 truncate opacity-80">
                 Kangra Hub Admin
               </div>
-              <h1 className="text-sm font-extrabold text-white truncate drop-shadow-xs">
+              <h1 className="text-xs sm:text-sm font-extrabold text-white truncate drop-shadow-xs">
                 {getPageTitle()}
               </h1>
             </div>
           </div>
 
-          <div className="flex items-center gap-2 sm:gap-3 flex-shrink-0">
+          <div className="flex items-center gap-1.5 sm:gap-3 flex-shrink-0">
             <AdminNotificationBell />
-            <AdminPwaInstall />
+            <AdminPwaInstall variant="header" />
             <div className="hidden sm:flex items-center gap-2 pl-3 border-l border-white/10 text-xs">
               <span className="relative flex h-2 w-2">
                 <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>

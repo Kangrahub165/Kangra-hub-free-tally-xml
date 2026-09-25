@@ -11,6 +11,7 @@ import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { StatusAlert } from '@/components/ui/StatusAlert';
 import { Badge } from '@/components/ui/Badge';
+import { AdminPwaInstall } from '@/components/admin/AdminPwaInstall';
 
 function AdminLoginForm() {
   const router = useRouter();
@@ -282,14 +283,16 @@ function AdminLoginForm() {
           </form>
         </div>
 
-        {/* Back Link */}
-        <div className="text-center mt-6">
+        {/* Back Link & PWA Install */}
+        <div className="flex flex-col sm:flex-row items-center justify-center gap-3 mt-6">
           <Link
             href="/"
             className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-400 hover:text-white transition-colors"
           >
             <ArrowLeft className="w-3.5 h-3.5" /> Return to Public Portal
           </Link>
+          <span className="text-slate-600 hidden sm:inline">•</span>
+          <AdminPwaInstall variant="login" />
         </div>
 
       </div>
