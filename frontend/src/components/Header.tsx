@@ -107,22 +107,28 @@ export function Header() {
             {isAuthenticated ? (
               <div className="flex items-center gap-2">
                 {isAdmin ? (
-                  <Link href="/admin">
-                    <Button variant="outline" size="sm" icon={<Shield className="w-3.5 h-3.5 text-brand-600" />}>
-                      Admin Panel
-                    </Button>
+                  <Link
+                    href="/admin"
+                    className="inline-flex items-center justify-center font-semibold transition-all duration-200 rounded-xl focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-1 select-none px-3 py-1.5 text-xs gap-1.5 bg-white text-slate-700 hover:bg-slate-50 hover:text-slate-900 border border-slate-200 shadow-xs hover:border-slate-300 active:scale-[0.97]"
+                  >
+                    <Shield className="w-3.5 h-3.5 text-brand-600" />
+                    Admin Panel
                   </Link>
                 ) : (
-                  <Link href="/dashboard">
-                    <Button variant="outline" size="sm" icon={<User className="w-3.5 h-3.5 text-slate-500" />}>
-                      Dashboard
-                    </Button>
+                  <Link
+                    href="/dashboard"
+                    className="inline-flex items-center justify-center font-semibold transition-all duration-200 rounded-xl focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-1 select-none px-3 py-1.5 text-xs gap-1.5 bg-white text-slate-700 hover:bg-slate-50 hover:text-slate-900 border border-slate-200 shadow-xs hover:border-slate-300 active:scale-[0.97]"
+                  >
+                    <User className="w-3.5 h-3.5 text-slate-500" />
+                    Dashboard
                   </Link>
                 )}
-                <Link href="/convert">
-                  <Button variant="primary" size="sm" iconRight={<ArrowRight className="w-3.5 h-3.5" />}>
-                    Convert Statement
-                  </Button>
+                <Link
+                  href="/convert"
+                  className="inline-flex items-center justify-center font-semibold transition-all duration-200 rounded-xl focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-1 select-none px-3 py-1.5 text-xs gap-1.5 bg-brand-600 text-white hover:bg-brand-500 hover:text-white shadow-sm border border-brand-700/20 hover:shadow-glow-brand active:scale-[0.97]"
+                >
+                  Convert Statement
+                  <ArrowRight className="w-3.5 h-3.5" />
                 </Link>
                 <button
                   onClick={handleLogout}
@@ -135,15 +141,18 @@ export function Header() {
               </div>
             ) : (
               <div className="flex items-center gap-2">
-                <Link href="/login">
-                  <Button variant="ghost" size="sm">
-                    Log In
-                  </Button>
+                <Link
+                  href="/login"
+                  className="inline-flex items-center justify-center font-semibold transition-all duration-200 rounded-xl focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-1 select-none px-3 py-1.5 text-xs gap-1.5 bg-transparent text-slate-600 hover:bg-slate-100 hover:text-slate-900 border border-transparent active:scale-[0.97]"
+                >
+                  Log In
                 </Link>
-                <Link href="/login?redirect=/convert">
-                  <Button variant="primary" size="sm" iconRight={<ArrowRight className="w-3.5 h-3.5" />}>
-                    Convert Statement
-                  </Button>
+                <Link
+                  href="/login?redirect=/convert"
+                  className="inline-flex items-center justify-center font-semibold transition-all duration-200 rounded-xl focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-1 select-none px-3 py-1.5 text-xs gap-1.5 bg-brand-600 text-white hover:bg-brand-500 hover:text-white shadow-sm border border-brand-700/20 hover:shadow-glow-brand active:scale-[0.97]"
+                >
+                  Convert Statement
+                  <ArrowRight className="w-3.5 h-3.5" />
                 </Link>
               </div>
             )}
@@ -204,20 +213,18 @@ export function Header() {
                 <Link
                   href="/convert"
                   onClick={() => setMobileMenuOpen(false)}
-                  className="w-full"
+                  className="w-full inline-flex items-center justify-center font-semibold transition-all duration-200 rounded-xl select-none px-4 py-2.5 text-sm gap-2 bg-brand-600 text-white hover:bg-brand-500 hover:text-white shadow-sm border border-brand-700/20 hover:shadow-glow-brand"
                 >
-                  <Button variant="primary" size="md" className="w-full" iconRight={<ArrowRight className="w-4 h-4" />}>
-                    Convert Statement
-                  </Button>
+                  Convert Statement
+                  <ArrowRight className="w-4 h-4" />
                 </Link>
                 <div className="grid grid-cols-2 gap-2">
                   <Link
                     href={isAdmin ? "/admin" : "/dashboard"}
                     onClick={() => setMobileMenuOpen(false)}
+                    className="w-full inline-flex items-center justify-center font-semibold transition-all duration-200 rounded-xl select-none px-3 py-1.5 text-xs gap-1.5 bg-white text-slate-700 hover:bg-slate-50 hover:text-slate-900 border border-slate-200 shadow-xs"
                   >
-                    <Button variant="outline" size="sm" className="w-full">
-                      {isAdmin ? "Admin Panel" : "Dashboard"}
-                    </Button>
+                    {isAdmin ? "Admin Panel" : "Dashboard"}
                   </Link>
                   <button
                     onClick={() => {
@@ -235,28 +242,25 @@ export function Header() {
                 <Link
                   href="/login?redirect=/convert"
                   onClick={() => setMobileMenuOpen(false)}
-                  className="w-full"
+                  className="w-full inline-flex items-center justify-center font-semibold transition-all duration-200 rounded-xl select-none px-4 py-2.5 text-sm gap-2 bg-brand-600 text-white hover:bg-brand-500 hover:text-white shadow-sm border border-brand-700/20 hover:shadow-glow-brand"
                 >
-                  <Button variant="primary" size="md" className="w-full" iconRight={<ArrowRight className="w-4 h-4" />}>
-                    Convert Statement
-                  </Button>
+                  Convert Statement
+                  <ArrowRight className="w-4 h-4" />
                 </Link>
                 <div className="grid grid-cols-2 gap-2">
                   <Link
                     href="/login"
                     onClick={() => setMobileMenuOpen(false)}
+                    className="w-full inline-flex items-center justify-center font-semibold transition-all duration-200 rounded-xl select-none px-3 py-1.5 text-xs gap-1.5 bg-white text-slate-700 hover:bg-slate-50 hover:text-slate-900 border border-slate-200 shadow-xs"
                   >
-                    <Button variant="outline" size="sm" className="w-full">
-                      Log In
-                    </Button>
+                    Log In
                   </Link>
                   <Link
                     href="/signup"
                     onClick={() => setMobileMenuOpen(false)}
+                    className="w-full inline-flex items-center justify-center font-semibold transition-all duration-200 rounded-xl select-none px-3 py-1.5 text-xs gap-1.5 bg-white text-slate-700 hover:bg-slate-50 hover:text-slate-900 border border-slate-200 shadow-xs"
                   >
-                    <Button variant="outline" size="sm" className="w-full">
-                      Sign Up
-                    </Button>
+                    Sign Up
                   </Link>
                 </div>
               </>
