@@ -13,13 +13,23 @@ export function middleware(request: NextRequest) {
   const token = request.cookies.get('kh_auth_token')?.value;
   const isAdmin = request.cookies.get('kh_is_admin')?.value === 'true';
 
+  // Check for Supabase session cookies as well to support direct Supabase auth persistence
+  const allCookies = request.cookies.getAll();
+  const hasSbAuthCookie = allCookies.some(
+    (c) =>
+      (c.name.startsWith('sb-') && (c.name.endsWith('-auth-token') || c.name.includes('-auth-token'))) ||
+      c.name === 'supabase-auth-token'
+  );
+
+  const hasUserAuth = !!token || hasSbAuthCookie;
+
   // 1. Enforce protection on private user routes
   const isProtectedUserRoute = PROTECTED_USER_ROUTES.some((route) =>
     pathname === route || pathname.startsWith(`${route}/`)
   );
 
   if (isProtectedUserRoute) {
-    if (!token) {
+    if (!hasUserAuth) {
       const redirectUrl = new URL('/login', request.url);
       redirectUrl.searchParams.set('redirect', pathname + search);
       return NextResponse.redirect(redirectUrl);
@@ -32,7 +42,7 @@ export function middleware(request: NextRequest) {
 
     // If accessing restricted admin console without admin token
     if (!isPublicAdminRoute) {
-      if (!token || !isAdmin) {
+      if (!hasUserAuth || !isAdmin) {
         const adminLoginUrl = new URL('/admin/login', request.url);
         adminLoginUrl.searchParams.set('next', pathname + search);
         return NextResponse.redirect(adminLoginUrl);

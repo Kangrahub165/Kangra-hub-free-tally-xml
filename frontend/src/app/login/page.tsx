@@ -5,7 +5,8 @@ import Link from 'next/link';
 import Image from 'next/image';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { ArrowRight, Mail, Lock, Eye, EyeOff, CheckCircle2 } from 'lucide-react';
-import { userLogin } from '@/lib/api';
+import { userLogin, adminLogin } from '@/lib/api';
+import { useAuth } from '@/components/auth/AuthProvider';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { Badge } from '@/components/ui/Badge';
@@ -14,8 +15,15 @@ import { StatusAlert } from '@/components/ui/StatusAlert';
 function LoginForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const nextUrl = searchParams.get('redirect') || searchParams.get('next');
+  const rawRedirect = searchParams.get('redirect') || searchParams.get('next');
+  let nextUrl = rawRedirect;
+  if (nextUrl) {
+    try {
+      nextUrl = decodeURIComponent(nextUrl);
+    } catch {}
+  }
   const isExpired = searchParams.get('expired') === 'true';
+  const { isAuthenticated, isLoading, isAdmin, login } = useAuth();
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -23,6 +31,19 @@ function LoginForm() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [infoMessage, setInfoMessage] = useState('');
+
+  // If already authenticated, redirect automatically to destination without showing login form
+  useEffect(() => {
+    if (!isLoading && isAuthenticated && !isExpired) {
+      let target = '/dashboard';
+      if (nextUrl && (!nextUrl.startsWith('/admin') || isAdmin)) {
+        target = nextUrl;
+      } else if (isAdmin) {
+        target = '/admin';
+      }
+      router.replace(target);
+    }
+  }, [isLoading, isAuthenticated, isAdmin, isExpired, nextUrl, router]);
 
   useEffect(() => {
     if (isExpired) {
@@ -45,13 +66,40 @@ function LoginForm() {
     setLoading(true);
 
     try {
-      await userLogin(cleanEmail, password);
-      // Determine destination: never redirect normal user to /admin
-      let target = '/dashboard';
-      if (nextUrl && !nextUrl.startsWith('/admin')) {
-        target = nextUrl;
+      // 1. Primary: Standard user authentication
+      try {
+        const data = await userLogin(cleanEmail, password);
+        login(data.token, data.user?.role === 'ADMIN', data.refresh_token, data.user);
+        let target = '/dashboard';
+        if (nextUrl && (!nextUrl.startsWith('/admin') || data.user?.role === 'ADMIN')) {
+          target = nextUrl;
+        }
+        router.push(target);
+        return;
+      } catch (err: any) {
+        if (
+          err.status === 403 ||
+          err.code === 'ACCOUNT_SUSPENDED' ||
+          (err.message && err.message.toLowerCase().includes('suspended'))
+        ) {
+          throw err;
+        }
+
+        // 2. Fallback: Check if administrator credentials were submitted on standard login
+        try {
+          const adminData = await adminLogin(cleanEmail, password);
+          if (adminData && adminData.token) {
+            login(adminData.token, true, undefined, adminData.user);
+            let target = nextUrl || '/convert';
+            router.push(target);
+            return;
+          }
+        } catch {
+          // Fall back to showing original login error
+        }
+
+        throw err;
       }
-      router.push(target);
     } catch (err: any) {
       if (
         err.status === 403 ||
@@ -69,7 +117,6 @@ function LoginForm() {
         return;
       }
       const msg = err.message || 'Invalid email or password. Please check your credentials and try again.';
-      // Ensure no raw JWT or internal errors are exposed
       if (msg.toLowerCase().includes('jwt') || msg.toLowerCase().includes('claims') || msg.toLowerCase().includes('signature')) {
         setError('Invalid email or password. Please try again.');
       } else {
@@ -79,6 +126,17 @@ function LoginForm() {
       setLoading(false);
     }
   };
+
+  if (!isLoading && isAuthenticated && !isExpired) {
+    return (
+      <div className="min-h-[60vh] flex flex-col items-center justify-center p-6 text-slate-400">
+        <div className="flex items-center gap-3 text-sm font-semibold text-slate-600">
+          <div className="w-6 h-6 border-2 border-brand-500 border-t-transparent rounded-full animate-spin" />
+          <span>Redirecting to your authenticated session...</span>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-[calc(100vh-5rem)] flex items-center justify-center p-4 sm:p-6 lg:p-10 bg-navy-50 gradient-surface">

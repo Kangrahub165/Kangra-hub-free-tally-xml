@@ -82,6 +82,7 @@ import { Modal } from '@/components/ui/Modal';
 import { StatusAlert } from '@/components/ui/StatusAlert';
 import { ProgressSteps } from '@/components/ui/ProgressSteps';
 import LedgerImportModal from '@/components/LedgerImportModal';
+import { useAuth } from '@/components/auth/AuthProvider';
 
 const WORKFLOW_STEPS = [
   { number: 1, label: 'Upload Statement' },
@@ -94,6 +95,7 @@ const WORKFLOW_STEPS = [
 
 export default function ConvertPage() {
   const router = useRouter();
+  const { isAuthenticated, isLoading, isAdmin } = useAuth();
 
   // Current active step: 1 (Upload), 2 (Detecting/Processing), 4 (Review/Mapping), 6 (Completed)
   const [currentStep, setCurrentStep] = useState(1);
@@ -170,8 +172,8 @@ export default function ConvertPage() {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    const token = getAuthToken();
-    if (!token) {
+    if (isLoading) return;
+    if (!isAuthenticated) {
       router.push('/login?redirect=/convert');
       return;
     }
@@ -190,7 +192,7 @@ export default function ConvertPage() {
         setCashLedgerName(configs['__cash__']);
       }
     }).catch(() => {});
-  }, [router]);
+  }, [isLoading, isAuthenticated, router]);
 
   const loadUserLedgers = async () => {
     try {
@@ -853,6 +855,17 @@ export default function ConvertPage() {
 
     return true;
   });
+
+  if (isLoading || !isAuthenticated) {
+    return (
+      <div className="min-h-[70vh] flex flex-col items-center justify-center p-6 text-slate-400">
+        <div className="flex items-center gap-3 text-sm font-semibold text-slate-600">
+          <div className="w-6 h-6 border-2 border-brand-500 border-t-transparent rounded-full animate-spin" />
+          <span>Verifying authentication session...</span>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="py-10 bg-slate-50 min-h-screen animate-fadeIn">

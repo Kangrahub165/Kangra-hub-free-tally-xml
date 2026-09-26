@@ -35,12 +35,14 @@ import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 
 import { getAuthToken, clearAuthToken, verifyAdmin } from '@/lib/api';
+import { useAuth } from '@/components/auth/AuthProvider';
 import { AdminNotificationBell } from '@/components/admin/AdminNotificationBell';
 import { AdminPwaInstall } from '@/components/admin/AdminPwaInstall';
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
+  const { isAuthenticated, isLoading: authLoading } = useAuth();
   const [isAdmin, setIsAdmin] = useState<boolean | null>(null);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
 
@@ -68,10 +70,11 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
 
   useEffect(() => {
     if (isAuthPage) return;
+    if (authLoading) return;
 
     if (typeof window !== 'undefined') {
       const token = getAuthToken();
-      if (!token) {
+      if (!token || !isAuthenticated) {
         setIsAdmin(false);
         router.replace(`/admin/login?next=${encodeURIComponent(pathname)}`);
         return;
@@ -96,7 +99,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
           }
         });
     }
-  }, [pathname, isAuthPage, router]);
+  }, [pathname, isAuthPage, authLoading, isAuthenticated, router]);
 
   const handleLogout = () => {
     if (typeof window !== 'undefined') {

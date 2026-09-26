@@ -23,20 +23,21 @@ import { Select } from '@/components/ui/Select';
 import { Tabs } from '@/components/ui/Tabs';
 import { StatusAlert } from '@/components/ui/StatusAlert';
 import { useRouter } from 'next/navigation';
-import { getAuthToken } from '@/lib/api';
+import { useAuth } from '@/components/auth/AuthProvider';
 
 export default function SettingsPage() {
   const router = useRouter();
+  const { isAuthenticated, isLoading } = useAuth();
   const [activeTab, setActiveTab] = useState('mappings');
   const [savedSuccess, setSavedSuccess] = useState(false);
   const [successMsg, setSuccessMsg] = useState('Settings updated successfully.');
 
   React.useEffect(() => {
-    const token = getAuthToken();
-    if (!token) {
+    if (isLoading) return;
+    if (!isAuthenticated) {
       router.push('/login?redirect=/settings');
     }
-  }, [router]);
+  }, [isLoading, isAuthenticated, router]);
 
   // Ledger mappings state
   const [mappings, setMappings] = useState([

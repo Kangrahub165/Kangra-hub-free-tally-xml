@@ -37,19 +37,6 @@ export function PwaInstallManager({
       (window.navigator as any).standalone === true;
     setIsStandalone(isStandaloneMode);
 
-    // Standalone launch authentication gating:
-    if (isStandaloneMode) {
-      const token = getAuthToken();
-      const currentPath = window.location.pathname;
-      if (!token) {
-        if (mode === 'ADMIN' && currentPath.startsWith('/admin') && !currentPath.includes('/admin/login')) {
-          window.location.href = `/admin/login?next=${encodeURIComponent(currentPath)}`;
-        } else if (mode === 'USER' && (currentPath.startsWith('/dashboard') || currentPath.startsWith('/convert'))) {
-          window.location.href = `/login?redirect=${encodeURIComponent(currentPath)}`;
-        }
-      }
-    }
-
     // Check if already captured globally on window
     if (typeof window !== 'undefined' && (window as any).__pwaDeferredPrompt) {
       setDeferredPrompt((window as any).__pwaDeferredPrompt);

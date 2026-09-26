@@ -216,17 +216,20 @@ export function getRefreshToken(): string {
 export function setAuthToken(token: string, isAdmin: boolean = false, refreshToken?: string) {
   if (typeof window !== 'undefined') {
     localStorage.setItem('kh_auth_token', token);
-    document.cookie = `kh_auth_token=${encodeURIComponent(token)}; path=/; max-age=604800; SameSite=Lax`;
+    const isSecure = window.location.protocol === 'https:';
+    const secureFlag = isSecure ? '; Secure' : '';
+    document.cookie = `kh_auth_token=${encodeURIComponent(token)}; path=/; max-age=604800; SameSite=Lax${secureFlag}`;
     if (refreshToken) {
       localStorage.setItem('kh_refresh_token', refreshToken);
     }
     if (isAdmin) {
       localStorage.setItem('kh_is_admin', 'true');
-      document.cookie = `kh_is_admin=true; path=/; max-age=604800; SameSite=Lax`;
+      document.cookie = `kh_is_admin=true; path=/; max-age=604800; SameSite=Lax${secureFlag}`;
     } else {
       localStorage.removeItem('kh_is_admin');
-      document.cookie = `kh_is_admin=; path=/; max-age=0; SameSite=Lax`;
+      document.cookie = `kh_is_admin=; path=/; max-age=0; SameSite=Lax${secureFlag}`;
     }
+    window.dispatchEvent(new Event('kh_auth_changed'));
   }
 }
 
@@ -235,8 +238,11 @@ export function clearAuthToken() {
     localStorage.removeItem('kh_auth_token');
     localStorage.removeItem('kh_refresh_token');
     localStorage.removeItem('kh_is_admin');
-    document.cookie = 'kh_auth_token=; path=/; max-age=0; SameSite=Lax';
-    document.cookie = 'kh_is_admin=; path=/; max-age=0; SameSite=Lax';
+    const isSecure = window.location.protocol === 'https:';
+    const secureFlag = isSecure ? '; Secure' : '';
+    document.cookie = `kh_auth_token=; path=/; max-age=0; SameSite=Lax${secureFlag}`;
+    document.cookie = `kh_is_admin=; path=/; max-age=0; SameSite=Lax${secureFlag}`;
+    window.dispatchEvent(new Event('kh_auth_changed'));
   }
 }
 
@@ -258,27 +264,42 @@ export async function refreshSessionToken(): Promise<string | null> {
     return refreshPromise;
   }
 
-  const refreshToken = getRefreshToken();
-  if (!refreshToken) return null;
-
   refreshPromise = (async () => {
     try {
-      const res = await fetch(`${API_BASE}/auth/refresh`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ refresh_token: refreshToken }),
-      });
-      if (!res.ok) {
-        clearAuthToken();
-        return null;
+      // 1. First attempt to refresh via Supabase Client if configured
+      try {
+        const { getSupabaseClient } = await import('@/lib/supabaseClient');
+        const supabase = getSupabaseClient();
+        if (supabase) {
+          const { data, error } = await supabase.auth.refreshSession();
+          if (!error && data?.session?.access_token) {
+            const isUserAdmin = getUserRole() === 'ADMIN' || data.session.user?.user_metadata?.role === 'ADMIN';
+            setAuthToken(data.session.access_token, isUserAdmin, data.session.refresh_token);
+            return data.session.access_token;
+          }
+        }
+      } catch (sbErr) {
+        // Fallback to backend refresh
       }
-      const data = await res.json();
-      if (data && data.token) {
-        setAuthToken(data.token, getUserRole() === 'ADMIN', data.refresh_token);
-        return data.token;
+
+      // 2. Fallback to backend refresh endpoint using stored refresh token
+      const refreshToken = getRefreshToken();
+      if (refreshToken) {
+        const res = await fetch(`${API_BASE}/auth/refresh`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ refresh_token: refreshToken }),
+        });
+        if (res.ok) {
+          const data = await res.json();
+          if (data && data.token) {
+            setAuthToken(data.token, getUserRole() === 'ADMIN', data.refresh_token);
+            return data.token;
+          }
+        }
       }
     } catch {
-      clearAuthToken();
+      // Refresh error handled safely
     } finally {
       refreshPromise = null;
     }

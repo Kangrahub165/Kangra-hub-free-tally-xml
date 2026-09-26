@@ -5,7 +5,8 @@ import Link from 'next/link';
 import Image from 'next/image';
 import { usePathname } from 'next/navigation';
 import { Menu, X, ArrowRight, User, FileSpreadsheet, Shield, LogOut } from 'lucide-react';
-import { getPublicSettings, PublicSettings, clearAuthToken, getUserRole } from '@/lib/api';
+import { getPublicSettings, PublicSettings } from '@/lib/api';
+import { useAuth } from './auth/AuthProvider';
 import { Badge } from './ui/Badge';
 import { Button } from './ui/Button';
 
@@ -13,17 +14,11 @@ export function Header() {
   const pathname = usePathname();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [settings, setSettings] = useState<PublicSettings | null>(null);
-  const [isLoggedIn, setIsLoggedIn] = useState(false);
-  const [userRole, setUserRole] = useState<'ADMIN' | 'USER' | 'GUEST'>('GUEST');
+  const { isAuthenticated, isAdmin, logout } = useAuth();
 
   useEffect(() => {
     getPublicSettings().then(setSettings).catch(() => {});
-    if (typeof window !== 'undefined') {
-      const token = localStorage.getItem('kh_auth_token');
-      setIsLoggedIn(!!token);
-      setUserRole(getUserRole());
-    }
-  }, [pathname]);
+  }, []);
 
   // Admin routes have their own full-screen specialized workspace sidebar
   if (pathname?.startsWith('/admin')) {
@@ -31,14 +26,11 @@ export function Header() {
   }
 
   const handleLogout = () => {
-    clearAuthToken();
-    setIsLoggedIn(false);
-    setUserRole('GUEST');
+    logout();
     window.location.href = '/';
   };
 
   const isFree = settings?.site_mode !== 'PAID';
-  const isAdmin = userRole === 'ADMIN';
 
   const navLinks = [
     { label: 'How It Works', href: '/how-it-works' },
@@ -112,13 +104,21 @@ export function Header() {
 
           {/* User / Authentication CTAs */}
           <div className="hidden md:flex items-center gap-2.5">
-            {isLoggedIn ? (
+            {isAuthenticated ? (
               <div className="flex items-center gap-2">
-                <Link href="/dashboard">
-                  <Button variant="outline" size="sm" icon={<User className="w-3.5 h-3.5 text-slate-500" />}>
-                    Dashboard
-                  </Button>
-                </Link>
+                {isAdmin ? (
+                  <Link href="/admin">
+                    <Button variant="outline" size="sm" icon={<Shield className="w-3.5 h-3.5 text-brand-600" />}>
+                      Admin Panel
+                    </Button>
+                  </Link>
+                ) : (
+                  <Link href="/dashboard">
+                    <Button variant="outline" size="sm" icon={<User className="w-3.5 h-3.5 text-slate-500" />}>
+                      Dashboard
+                    </Button>
+                  </Link>
+                )}
                 <Link href="/convert">
                   <Button variant="primary" size="sm" iconRight={<ArrowRight className="w-3.5 h-3.5" />}>
                     Convert Statement
@@ -140,9 +140,9 @@ export function Header() {
                     Log In
                   </Button>
                 </Link>
-                <Link href="/signup">
-                  <Button variant="primary" size="sm" className="bg-gradient-to-r from-brand-600 to-brand-500 hover:from-brand-500 hover:to-brand-400 border-none shadow-glow-brand" iconRight={<ArrowRight className="w-3.5 h-3.5" />}>
-                    Get Started Free
+                <Link href="/login?redirect=/convert">
+                  <Button variant="primary" size="sm" iconRight={<ArrowRight className="w-3.5 h-3.5" />}>
+                    Convert Statement
                   </Button>
                 </Link>
               </div>
@@ -199,7 +199,7 @@ export function Header() {
           </div>
 
           <div className="pt-3 border-t border-slate-100 flex flex-col gap-2">
-            {isLoggedIn ? (
+            {isAuthenticated ? (
               <>
                 <Link
                   href="/convert"
@@ -207,16 +207,16 @@ export function Header() {
                   className="w-full"
                 >
                   <Button variant="primary" size="md" className="w-full" iconRight={<ArrowRight className="w-4 h-4" />}>
-                    Start Conversion
+                    Convert Statement
                   </Button>
                 </Link>
                 <div className="grid grid-cols-2 gap-2">
                   <Link
-                    href="/dashboard"
+                    href={isAdmin ? "/admin" : "/dashboard"}
                     onClick={() => setMobileMenuOpen(false)}
                   >
                     <Button variant="outline" size="sm" className="w-full">
-                      Dashboard
+                      {isAdmin ? "Admin Panel" : "Dashboard"}
                     </Button>
                   </Link>
                   <button
@@ -233,23 +233,32 @@ export function Header() {
             ) : (
               <>
                 <Link
-                  href="/signup"
+                  href="/login?redirect=/convert"
                   onClick={() => setMobileMenuOpen(false)}
                   className="w-full"
                 >
                   <Button variant="primary" size="md" className="w-full" iconRight={<ArrowRight className="w-4 h-4" />}>
-                    Create Free Account
+                    Convert Statement
                   </Button>
                 </Link>
-                <Link
-                  href="/login"
-                  onClick={() => setMobileMenuOpen(false)}
-                  className="w-full"
-                >
-                  <Button variant="outline" size="md" className="w-full">
-                    Log In
-                  </Button>
-                </Link>
+                <div className="grid grid-cols-2 gap-2">
+                  <Link
+                    href="/login"
+                    onClick={() => setMobileMenuOpen(false)}
+                  >
+                    <Button variant="outline" size="sm" className="w-full">
+                      Log In
+                    </Button>
+                  </Link>
+                  <Link
+                    href="/signup"
+                    onClick={() => setMobileMenuOpen(false)}
+                  >
+                    <Button variant="outline" size="sm" className="w-full">
+                      Sign Up
+                    </Button>
+                  </Link>
+                </div>
               </>
             )}
           </div>

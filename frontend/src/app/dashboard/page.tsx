@@ -17,7 +17,8 @@ import {
   Lock
 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
-import { getUserUsage, getUserConversions, UsageInfo, ConversionJobSummary, getAuthToken } from '@/lib/api';
+import { getUserUsage, getUserConversions, UsageInfo, ConversionJobSummary } from '@/lib/api';
+import { useAuth } from '@/components/auth/AuthProvider';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/Card';
@@ -27,13 +28,14 @@ import { Skeleton } from '@/components/ui/Skeleton';
 
 export default function UserDashboardPage() {
   const router = useRouter();
+  const { isAuthenticated, isLoading } = useAuth();
   const [usage, setUsage] = useState<UsageInfo | null>(null);
   const [conversions, setConversions] = useState<ConversionJobSummary[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const token = getAuthToken();
-    if (!token) {
+    if (isLoading) return;
+    if (!isAuthenticated) {
       router.push('/login?redirect=/dashboard');
       return;
     }
@@ -45,7 +47,7 @@ export default function UserDashboardPage() {
         setLoading(false);
       })
       .catch(() => setLoading(false));
-  }, [router]);
+  }, [isLoading, isAuthenticated, router]);
 
   const totalConversions = conversions.length;
   const successfulConversions = conversions.filter((c) => c.status === 'COMPLETED').length;

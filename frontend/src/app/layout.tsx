@@ -5,6 +5,7 @@ import { Header } from '@/components/Header';
 import { Footer } from '@/components/Footer';
 import { SEO_CONFIG } from '@/lib/seo.config';
 import { PwaInstallManager } from '@/components/pwa/PwaInstallManager';
+import { AuthProvider } from '@/components/auth/AuthProvider';
 
 const inter = Inter({
   subsets: ['latin'],
@@ -88,10 +89,12 @@ export default function RootLayout({
         />
       </head>
       <body className="font-sans antialiased min-h-screen flex flex-col justify-between">
-        <Header />
-        <main className="flex-1">{children}</main>
-        <Footer />
-        <PwaInstallManager mode="USER" />
+        <AuthProvider>
+          <Header />
+          <main className="flex-1">{children}</main>
+          <Footer />
+          <PwaInstallManager mode="USER" />
+        </AuthProvider>
       </body>
     </html>
   );

@@ -4,7 +4,8 @@ import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { FileText, Download, CheckCircle2, AlertTriangle, XCircle, ArrowRight, Search, X } from 'lucide-react';
-import { getUserConversions, ConversionJobSummary, getAuthToken } from '@/lib/api';
+import { getUserConversions, ConversionJobSummary } from '@/lib/api';
+import { useAuth } from '@/components/auth/AuthProvider';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { Card, CardHeader, CardTitle, CardDescription } from '@/components/ui/Card';
@@ -18,10 +19,11 @@ export default function HistoryPage() {
   const [loading, setLoading] = useState(true);
 
   const router = useRouter();
+  const { isAuthenticated, isLoading } = useAuth();
 
   useEffect(() => {
-    const token = getAuthToken();
-    if (!token) {
+    if (isLoading) return;
+    if (!isAuthenticated) {
       router.push('/login?redirect=/history');
       return;
     }
@@ -31,7 +33,7 @@ export default function HistoryPage() {
         setLoading(false);
       })
       .catch(() => setLoading(false));
-  }, [router]);
+  }, [isLoading, isAuthenticated, router]);
 
   const filtered = conversions.filter((job) => {
     const matchesSearch =

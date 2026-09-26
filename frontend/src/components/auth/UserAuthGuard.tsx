@@ -1,27 +1,21 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
-import { getAuthToken } from '@/lib/api';
+import { useAuth } from './AuthProvider';
 
 export function UserAuthGuard({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
-  const [authorized, setAuthorized] = useState<boolean | null>(null);
+  const { isAuthenticated, isLoading } = useAuth();
 
   useEffect(() => {
-    if (typeof window !== 'undefined') {
-      const token = getAuthToken();
-      if (!token) {
-        setAuthorized(false);
-        router.replace(`/login?redirect=${encodeURIComponent(pathname)}`);
-      } else {
-        setAuthorized(true);
-      }
+    if (!isLoading && !isAuthenticated) {
+      router.replace(`/login?redirect=${encodeURIComponent(pathname)}`);
     }
-  }, [pathname, router]);
+  }, [isLoading, isAuthenticated, pathname, router]);
 
-  if (authorized !== true) {
+  if (isLoading || !isAuthenticated) {
     return (
       <div className="min-h-[60vh] flex flex-col items-center justify-center p-6 text-slate-400">
         <div className="flex items-center gap-3 text-xs font-semibold">
