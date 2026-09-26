@@ -148,7 +148,7 @@ export function Header() {
                   Log In
                 </Link>
                 <Link
-                  href="/login?redirect=/convert"
+                  href="/convert"
                   className="inline-flex items-center justify-center font-semibold transition-all duration-200 rounded-xl focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-1 select-none px-3 py-1.5 text-xs gap-1.5 bg-brand-600 text-white hover:bg-brand-500 hover:text-white shadow-sm border border-brand-700/20 hover:shadow-glow-brand active:scale-[0.97]"
                 >
                   Convert Statement
@@ -240,7 +240,7 @@ export function Header() {
             ) : (
               <>
                 <Link
-                  href="/login?redirect=/convert"
+                  href="/convert"
                   onClick={() => setMobileMenuOpen(false)}
                   className="w-full inline-flex items-center justify-center font-semibold transition-all duration-200 rounded-xl select-none px-4 py-2.5 text-sm gap-2 bg-brand-600 text-white hover:bg-brand-500 hover:text-white shadow-sm border border-brand-700/20 hover:shadow-glow-brand"
                 >

@@ -24,6 +24,7 @@ function LoginForm() {
   }
   const isExpired = searchParams.get('expired') === 'true';
   const { isAuthenticated, isLoading, isAdmin, login } = useAuth();
+  const [isMounted, setIsMounted] = useState(false);
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -32,18 +33,26 @@ function LoginForm() {
   const [error, setError] = useState('');
   const [infoMessage, setInfoMessage] = useState('');
 
+  useEffect(() => {
+    setIsMounted(true);
+  }, []);
+
+  const target = (nextUrl && (!nextUrl.startsWith('/admin') || isAdmin))
+    ? nextUrl
+    : (isAdmin ? '/admin' : '/dashboard');
+
   // If already authenticated, redirect automatically to destination without showing login form
   useEffect(() => {
-    if (!isLoading && isAuthenticated && !isExpired) {
-      let target = '/dashboard';
-      if (nextUrl && (!nextUrl.startsWith('/admin') || isAdmin)) {
-        target = nextUrl;
-      } else if (isAdmin) {
-        target = '/admin';
-      }
-      router.replace(target);
+    if (isMounted && !isLoading && isAuthenticated && !isExpired) {
+      window.location.replace(target);
+
+      const fallbackTimer = setTimeout(() => {
+        window.location.href = target;
+      }, 1200);
+
+      return () => clearTimeout(fallbackTimer);
     }
-  }, [isLoading, isAuthenticated, isAdmin, isExpired, nextUrl, router]);
+  }, [isMounted, isLoading, isAuthenticated, isAdmin, isExpired, target]);
 
   useEffect(() => {
     if (isExpired) {
@@ -70,11 +79,11 @@ function LoginForm() {
       try {
         const data = await userLogin(cleanEmail, password);
         login(data.token, data.user?.role === 'ADMIN', data.refresh_token, data.user);
-        let target = '/dashboard';
+        let dest = '/dashboard';
         if (nextUrl && (!nextUrl.startsWith('/admin') || data.user?.role === 'ADMIN')) {
-          target = nextUrl;
+          dest = nextUrl;
         }
-        router.push(target);
+        window.location.href = dest;
         return;
       } catch (err: any) {
         if (
@@ -90,8 +99,8 @@ function LoginForm() {
           const adminData = await adminLogin(cleanEmail, password);
           if (adminData && adminData.token) {
             login(adminData.token, true, undefined, adminData.user);
-            let target = nextUrl || '/convert';
-            router.push(target);
+            let dest = nextUrl || '/convert';
+            window.location.href = dest;
             return;
           }
         } catch {
@@ -127,12 +136,28 @@ function LoginForm() {
     }
   };
 
-  if (!isLoading && isAuthenticated && !isExpired) {
+  if (isMounted && !isLoading && isAuthenticated && !isExpired) {
     return (
-      <div className="min-h-[60vh] flex flex-col items-center justify-center p-6 text-slate-400">
-        <div className="flex items-center gap-3 text-sm font-semibold text-slate-600">
-          <div className="w-6 h-6 border-2 border-brand-500 border-t-transparent rounded-full animate-spin" />
-          <span>Redirecting to your authenticated session...</span>
+      <div className="min-h-[70vh] flex flex-col items-center justify-center p-6 text-slate-600">
+        <div className="max-w-md w-full bg-white rounded-3xl border border-slate-200/80 shadow-modal p-8 text-center space-y-5 animate-fadeIn">
+          <div className="mx-auto w-14 h-14 bg-brand-50 border border-brand-100 rounded-2xl flex items-center justify-center text-brand-600">
+            <div className="w-6 h-6 border-2 border-brand-600 border-t-transparent rounded-full animate-spin" />
+          </div>
+          <div>
+            <h2 className="text-lg font-bold text-navy-900">Redirecting to Your Session</h2>
+            <p className="text-xs text-navy-500 mt-1">
+              You are already signed in. Taking you to your destination...
+            </p>
+          </div>
+          <div className="pt-2">
+            <a
+              href={target}
+              className="inline-flex items-center justify-center gap-2 w-full py-2.5 px-4 text-xs font-semibold text-white bg-brand-600 hover:bg-brand-500 rounded-xl transition-all shadow-sm"
+            >
+              Continue to {target === '/convert' ? 'Conversion Studio' : 'Dashboard'}
+              <ArrowRight className="w-3.5 h-3.5" />
+            </a>
+          </div>
         </div>
       </div>
     );
