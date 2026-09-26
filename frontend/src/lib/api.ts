@@ -201,14 +201,50 @@ const API_BASE = process.env.NEXT_PUBLIC_API_URL || process.env.BACKEND_URL || '
 
 export function getAuthToken(): string {
   if (typeof window !== 'undefined') {
-    return localStorage.getItem('kh_auth_token') || '';
+    const directToken = localStorage.getItem('kh_auth_token');
+    if (directToken) return directToken;
+
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key && (key.startsWith('sb-') && key.endsWith('-auth-token') || key === 'supabase.auth.token')) {
+        try {
+          const item = localStorage.getItem(key);
+          if (item) {
+            const parsed = JSON.parse(item);
+            const token = parsed?.access_token || parsed?.currentSession?.access_token;
+            if (token) {
+              localStorage.setItem('kh_auth_token', token);
+              return token;
+            }
+          }
+        } catch {}
+      }
+    }
   }
   return '';
 }
 
 export function getRefreshToken(): string {
   if (typeof window !== 'undefined') {
-    return localStorage.getItem('kh_refresh_token') || '';
+    const directToken = localStorage.getItem('kh_refresh_token');
+    if (directToken) return directToken;
+
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key && (key.startsWith('sb-') && key.endsWith('-auth-token') || key === 'supabase.auth.token')) {
+        try {
+          const item = localStorage.getItem(key);
+          if (item) {
+            const parsed = JSON.parse(item);
+            const refreshToken = parsed?.refresh_token || parsed?.currentSession?.refresh_token;
+            if (refreshToken) {
+              localStorage.setItem('kh_refresh_token', refreshToken);
+              return refreshToken;
+            }
+          }
+        } catch {}
+      }
+    }
   }
   return '';
 }
@@ -248,10 +284,27 @@ export function clearAuthToken() {
 
 export function getUserRole(): 'ADMIN' | 'USER' | 'GUEST' {
   if (typeof window !== 'undefined') {
-    const token = localStorage.getItem('kh_auth_token');
+    const token = getAuthToken();
     if (!token) return 'GUEST';
     const isAdmin = localStorage.getItem('kh_is_admin') === 'true';
     if (isAdmin) return 'ADMIN';
+
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key && key.startsWith('sb-') && key.endsWith('-auth-token')) {
+        try {
+          const item = localStorage.getItem(key);
+          if (item) {
+            const parsed = JSON.parse(item);
+            const role = parsed?.user?.user_metadata?.role || parsed?.user?.app_metadata?.role;
+            if (role === 'ADMIN') {
+              localStorage.setItem('kh_is_admin', 'true');
+              return 'ADMIN';
+            }
+          }
+        } catch {}
+      }
+    }
     return 'USER';
   }
   return 'GUEST';
@@ -524,34 +577,6 @@ export async function apiFetch<T>(endpoint: string, options: RequestInit = {}): 
         headers,
       });
     } else {
-      clearAuthToken();
-      if (typeof window !== 'undefined') {
-        const currentPath = window.location.pathname;
-        const isAuthOrPublicPage = 
-          currentPath === '/login' ||
-          currentPath.startsWith('/login') ||
-          currentPath === '/admin/login' ||
-          currentPath.startsWith('/admin/login') ||
-          currentPath === '/signup' ||
-          currentPath === '/suspended' ||
-          currentPath === '/forgot-password' ||
-          currentPath === '/reset-password' ||
-          currentPath === '/recover' ||
-          currentPath === '/' ||
-          currentPath === '/contact' ||
-          currentPath === '/faq' ||
-          currentPath === '/terms' ||
-          currentPath === '/privacy';
-
-        if (!isAuthOrPublicPage) {
-          const expiredQuery = hadToken ? 'expired=true&' : '';
-          if (currentPath.startsWith('/admin')) {
-            window.location.href = `/admin/login?${expiredQuery}next=${encodeURIComponent(currentPath)}`;
-          } else {
-            window.location.href = `/login?${expiredQuery}redirect=${encodeURIComponent(currentPath)}`;
-          }
-        }
-      }
       const err: any = new Error(hadToken ? 'Your session has expired. Please log in again to continue.' : 'Authentication required.');
       err.status = 401;
       err.code = hadToken ? 'ERR_TOKEN_EXPIRED' : 'ERR_UNAUTHORIZED';
