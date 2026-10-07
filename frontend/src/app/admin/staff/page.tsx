@@ -32,6 +32,7 @@ import {
   getAdminSubscriptions,
   approveSubscription,
   rejectSubscription,
+  getAdminUsers,
   StaffUserItem,
   StaffAuditLogItem,
   SuspiciousActivityItem,
@@ -65,6 +66,8 @@ export default function AdminStaffManagementPage() {
   const [newIsGold, setNewIsGold] = useState(false);
   const [newExpiryDays, setNewExpiryDays] = useState<number>(30);
   const [isSubmittingAdd, setIsSubmittingAdd] = useState(false);
+  const [availableUsers, setAvailableUsers] = useState<any[]>([]);
+  const [userSearchFocus, setUserSearchFocus] = useState(false);
 
   // Extend Expiry Modal
   const [selectedStaffUser, setSelectedStaffUser] = useState<StaffUserItem | null>(null);
@@ -98,6 +101,12 @@ export default function AdminStaffManagementPage() {
   useEffect(() => {
     loadData();
   }, [activeTab]);
+
+  useEffect(() => {
+    if (isAddModalOpen) {
+      getAdminUsers().then(users => setAvailableUsers(users || [])).catch(() => {});
+    }
+  }, [isAddModalOpen]);
 
   const showNotification = (msg: string) => {
     setActionMsg(msg);
@@ -592,18 +601,68 @@ export default function AdminStaffManagementPage() {
         title="Add User to Staff Group"
       >
         <form onSubmit={handleAddStaff} className="space-y-4 text-xs font-sans">
-          <div>
+          <div className="relative">
             <label className="block font-bold text-slate-700 mb-1">
-              User Email or User ID <span className="text-rose-500">*</span>
+              Search & Select User <span className="text-rose-500">*</span>
             </label>
-            <input
-              type="text"
-              required
-              placeholder="e.g. user@example.com"
-              value={newUserEmail}
-              onChange={(e) => setNewUserEmail(e.target.value)}
-              className="w-full px-3 py-2 rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-brand-500"
-            />
+            <div className="relative">
+              <input
+                type="text"
+                required
+                placeholder="Search registered user by email or name..."
+                value={newUserEmail}
+                onChange={(e) => {
+                  setNewUserEmail(e.target.value);
+                  setUserSearchFocus(true);
+                }}
+                onFocus={() => setUserSearchFocus(true)}
+                className="w-full px-3 py-2 pl-9 rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-brand-500 text-xs"
+              />
+              <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+            </div>
+
+            {userSearchFocus && availableUsers.length > 0 && (
+              <div className="absolute z-50 left-0 right-0 mt-1 max-h-48 overflow-y-auto bg-white border border-slate-200 rounded-xl shadow-lg divide-y divide-slate-100">
+                {availableUsers
+                  .filter((u: any) => {
+                    if (!newUserEmail.trim()) return true;
+                    const q = newUserEmail.toLowerCase().trim();
+                    return (
+                      (u.email && u.email.toLowerCase().includes(q)) ||
+                      (u.full_name && u.full_name.toLowerCase().includes(q)) ||
+                      (u.id && u.id.toLowerCase().includes(q))
+                    );
+                  })
+                  .slice(0, 10)
+                  .map((u: any) => (
+                    <div
+                      key={u.id}
+                      onMouseDown={() => {
+                        setNewUserEmail(u.email || u.id);
+                        setUserSearchFocus(false);
+                      }}
+                      className="p-2.5 hover:bg-slate-50 cursor-pointer flex items-center justify-between text-xs transition-colors"
+                    >
+                      <div>
+                        <div className="font-bold text-slate-900">{u.email}</div>
+                        <div className="text-[11px] text-slate-500">{u.full_name || 'No name'}</div>
+                      </div>
+                      <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                        u.role === 'STAFF'
+                          ? 'bg-amber-100 text-amber-800'
+                          : u.role === 'ADMIN'
+                          ? 'bg-purple-100 text-purple-800'
+                          : 'bg-slate-100 text-slate-700'
+                      }`}>
+                        {u.role || 'USER'}
+                      </span>
+                    </div>
+                  ))}
+              </div>
+            )}
+            <span className="text-[11px] text-slate-400 mt-1 block">
+              Type to filter registered users or paste an exact email / user ID.
+            </span>
           </div>
 
           <div className="flex items-center gap-3 p-3 rounded-xl bg-slate-50 border border-slate-200">

@@ -2087,8 +2087,17 @@ class InvoiceExtractor:
             uom = "NOS"
             uom_pattern = r'(?:\b|\d)(dz|doz|dozen|cases?|pcs|nos|box(?:es)?|bags?|kgs?|ltrs?|mtrs?|pkts?|bottles?|can|crates?|sets?|rolls?|gm|gms|pair|pairs)\b'
             uom_m = re.search(uom_pattern, row_text, re.IGNORECASE)
-            if uom_m:
-                raw_uom = uom_m.group(1).upper()
+            raw_uom = uom_m.group(1).upper() if uom_m else None
+
+            regex_qty = None
+            uom_pattern_with_qty = r'\b([0-9]+(?:\.[0-9]{1,3})?)\s*(dz|doz|dozen|cases?|pcs|nos|box(?:es)?|bags?|kgs?|ltrs?|mtrs?|pkts?|bottles?|can|crates?|sets?|rolls?|gm|gms|pair|pairs)\b'
+            uom_m_q = re.search(uom_pattern_with_qty, row_text, re.IGNORECASE)
+            if uom_m_q:
+                regex_qty = to_decimal(uom_m_q.group(1))
+                if not raw_uom:
+                    raw_uom = uom_m_q.group(2).upper()
+
+            if raw_uom:
                 if raw_uom in ('DZ', 'DOZ', 'DOZEN'):
                     uom = 'DZ'
                 elif raw_uom in ('BOTTLE', 'BOTTLES'):
@@ -2113,6 +2122,8 @@ class InvoiceExtractor:
             masked_row_text, _ = strip_pack_sizes_from_text(row_text)
             nums = re.findall(r'\b[0-9]+(?:\.[0-9]{1,4})?\b', masked_row_text)
             dec_nums = [to_decimal(n) for n in nums if to_decimal(n) > Decimal("0.00")]
+            if regex_qty and regex_qty > Decimal("0.00") and regex_qty not in dec_nums:
+                dec_nums.append(regex_qty)
 
             is_valid_item_row = False
             qty = Decimal("1.00")
@@ -2372,6 +2383,8 @@ class InvoiceExtractor:
                                         or (row_amt is not None and table_close(best_a, row_amt))
                                         or (row_taxable is not None and table_close(best_a, row_taxable))
                                         or (row_total_amt is not None and table_close(best_a, row_total_amt))):
+                                        if regex_qty and regex_qty > Decimal("0.00") and best_r == regex_qty and best_q != regex_qty:
+                                            best_q, best_r = best_r, best_q
                                         used_cols = {q_col, r_col, a_col}
                                         unused_vals = [cand_dict[k] for k in cand_cols if k not in used_cols]
 
@@ -2392,14 +2405,20 @@ class InvoiceExtractor:
                                         if (row_amt is not None and table_close(best_a, row_amt)) or (row_total_amt is not None and table_close(best_a, row_total_amt)) or table_close(best_a, taxable):
                                             taxable = best_a
 
-                        # Arithmetic quantity & rate recovery if qty was defaulted to 1.00 or missing
+                        # Arithmetic quantity & rate recovery if qty was defaulted to 1.00, missing, or mistaken for HSN
                         if is_valid_item_row:
-                            if qty is None or qty <= Decimal("0.00") or (qty == Decimal("1.00") and rate > Decimal("0.00") and taxable > Decimal("0.00") and abs(rate - taxable) > Decimal("0.10")):
-                                recovered_q, recovered_r = recover_missing_quantity_or_rate(qty, rate, taxable)
-                                if recovered_q is not None:
-                                    qty = recovered_q
-                                if recovered_r is not None and rate <= Decimal("0.00"):
-                                    rate = recovered_r
+                            is_qty_hsn = (hsn_dec and qty == hsn_dec) or (qty >= 1000 and float(qty).is_integer() and (regex_qty or rate > Decimal("0.00")))
+                            if is_qty_hsn and regex_qty:
+                                qty = regex_qty
+                            elif qty is None or qty <= Decimal("0.00") or (qty == Decimal("1.00") and rate > Decimal("0.00") and taxable > Decimal("0.00") and abs(rate - taxable) > Decimal("0.10")):
+                                if regex_qty and regex_qty > Decimal("0.00"):
+                                    qty = regex_qty
+                                else:
+                                    recovered_q, recovered_r = recover_missing_quantity_or_rate(qty, rate, taxable)
+                                    if recovered_q is not None:
+                                        qty = recovered_q
+                                    if recovered_r is not None and rate <= Decimal("0.00"):
+                                        rate = recovered_r
                             if rate <= Decimal("0.00") and qty > Decimal("0.00") and taxable > Decimal("0.00"):
                                 rate = (taxable / qty).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
                 elif items and (row_desc or row_text) and (effective_taxable is None or effective_taxable == Decimal("0.00")):

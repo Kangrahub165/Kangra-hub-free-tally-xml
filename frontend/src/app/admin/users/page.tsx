@@ -14,7 +14,9 @@ import {
   updateUserQuota, 
   getAdminUserActivity,
   UserActivityLog,
-  apiFetch 
+  apiFetch,
+  addStaffMember,
+  removeStaffMember
 } from '@/lib/api';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
@@ -85,6 +87,36 @@ export default function AdminUsersPage() {
       setTimeout(() => setActionMsg(''), 3500);
     } catch {
       setErrorMsg('Failed to revoke unlimited access');
+      setTimeout(() => setErrorMsg(''), 3500);
+    }
+  };
+
+  const handleAddStaffUser = async (userId: string) => {
+    try {
+      const res = await addStaffMember({ user_id_or_email: userId, is_gold: false });
+      setActionMsg(res.message || 'User added to Staff group.');
+      fetchUsers();
+      if (selectedUser?.id === userId) {
+        openUserDetails(userId);
+      }
+      setTimeout(() => setActionMsg(''), 3500);
+    } catch (err: any) {
+      setErrorMsg(err.message || 'Failed to add user to Staff.');
+      setTimeout(() => setErrorMsg(''), 3500);
+    }
+  };
+
+  const handleRemoveStaffUser = async (userId: string) => {
+    try {
+      const res = await removeStaffMember({ user_id_or_email: userId });
+      setActionMsg(res.message || 'User removed from Staff group.');
+      fetchUsers();
+      if (selectedUser?.id === userId) {
+        openUserDetails(userId);
+      }
+      setTimeout(() => setActionMsg(''), 3500);
+    } catch (err: any) {
+      setErrorMsg(err.message || 'Failed to remove user from Staff.');
       setTimeout(() => setErrorMsg(''), 3500);
     }
   };
@@ -377,6 +409,28 @@ export default function AdminUsersPage() {
 
                         {!isAdmin && (
                           <>
+                            {u.role === 'STAFF' ? (
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => handleRemoveStaffUser(u.id)}
+                                title="Remove user from Staff group"
+                                className="text-amber-800 border-amber-300 hover:bg-amber-50"
+                              >
+                                -Staff
+                              </Button>
+                            ) : (
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => handleAddStaffUser(u.id)}
+                                title="Add user to Staff group"
+                                className="text-slate-700 hover:bg-slate-100"
+                              >
+                                +Staff
+                              </Button>
+                            )}
+
                             {u.is_unlimited ? (
                               <Button
                                 variant="outline"
@@ -689,6 +743,28 @@ export default function AdminUsersPage() {
                 >
                   Reset Today's Usage
                 </Button>
+
+                {selectedUser.role === 'STAFF' ? (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => handleRemoveStaffUser(selectedUser.id)}
+                    icon={<Users className="w-3.5 h-3.5 text-rose-500" />}
+                    className="w-full justify-center text-xs text-rose-600 hover:text-rose-700 hover:bg-rose-50 border-rose-200"
+                  >
+                    Remove from Staff
+                  </Button>
+                ) : (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => handleAddStaffUser(selectedUser.id)}
+                    icon={<Users className="w-3.5 h-3.5 text-brand-600" />}
+                    className="w-full justify-center text-xs text-brand-600 hover:text-brand-700 hover:bg-brand-50 border-brand-200"
+                  >
+                    Add to Staff
+                  </Button>
+                )}
 
                 {selectedUser.is_unlimited ? (
                   <Button

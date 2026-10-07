@@ -24,7 +24,9 @@ import {
   Phone,
   Mail,
   ShieldCheck,
-  UserCheck
+  UserCheck,
+  Camera,
+  Trash2
 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { 
@@ -36,7 +38,9 @@ import {
   updateUserProfile,
   submitReview,
   getMyReview,
-  ReviewItem
+  ReviewItem,
+  uploadProfilePicture,
+  removeProfilePicture
 } from '@/lib/api';
 import { useAuth } from '@/components/auth/AuthProvider';
 import { Badge } from '@/components/ui/Badge';
@@ -50,7 +54,7 @@ import { SubscriptionModal } from '@/components/SubscriptionModal';
 
 export default function UserDashboardPage() {
   const router = useRouter();
-  const { isAuthenticated, isLoading, user, isStaff, isGold } = useAuth();
+  const { isAuthenticated, isLoading, user, isStaff, isGold, refreshProfile } = useAuth();
   const [usage, setUsage] = useState<UsageInfo | null>(null);
   const [conversions, setConversions] = useState<ConversionJobSummary[]>([]);
   const [loading, setLoading] = useState(true);
@@ -63,6 +67,11 @@ export default function UserDashboardPage() {
   const [profileSaving, setProfileSaving] = useState(false);
   const [profileMessage, setProfileMessage] = useState<string | null>(null);
   const [profileError, setProfileError] = useState<string | null>(null);
+
+  // Avatar states
+  const [avatarLoading, setAvatarLoading] = useState(false);
+  const [avatarMessage, setAvatarMessage] = useState<string | null>(null);
+  const [avatarError, setAvatarError] = useState<string | null>(null);
 
   // Reviews states
   const [rating, setRating] = useState<number>(5);
@@ -131,6 +140,44 @@ export default function UserDashboardPage() {
       setProfileError(err?.message || 'Failed to update profile. Please try again.');
     } finally {
       setProfileSaving(false);
+    }
+  };
+
+  const handleAvatarUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setAvatarLoading(true);
+    setAvatarError(null);
+    setAvatarMessage(null);
+    try {
+      await uploadProfilePicture(file);
+      setAvatarMessage('Profile picture updated successfully!');
+      if (refreshProfile) await refreshProfile();
+      setTimeout(() => setAvatarMessage(null), 3500);
+    } catch (err: any) {
+      setAvatarError(err?.message || 'Failed to upload profile picture.');
+      setTimeout(() => setAvatarError(null), 4000);
+    } finally {
+      setAvatarLoading(false);
+      e.target.value = '';
+    }
+  };
+
+  const handleAvatarRemove = async () => {
+    if (!confirm('Are you sure you want to remove your profile picture?')) return;
+    setAvatarLoading(true);
+    setAvatarError(null);
+    setAvatarMessage(null);
+    try {
+      await removeProfilePicture();
+      setAvatarMessage('Profile picture removed.');
+      if (refreshProfile) await refreshProfile();
+      setTimeout(() => setAvatarMessage(null), 3500);
+    } catch (err: any) {
+      setAvatarError(err?.message || 'Failed to remove profile picture.');
+      setTimeout(() => setAvatarError(null), 4000);
+    } finally {
+      setAvatarLoading(false);
     }
   };
 
@@ -507,6 +554,69 @@ export default function UserDashboardPage() {
                     <span>{profileError}</span>
                   </div>
                 )}
+
+                {/* Profile Picture Upload & Preview */}
+                <div className="flex flex-col sm:flex-row sm:items-center gap-4 p-4 rounded-2xl bg-slate-50 border border-slate-200/80">
+                  <div className="relative shrink-0">
+                    {user?.avatarUrl ? (
+                      <img
+                        src={user.avatarUrl}
+                        alt="Profile Picture"
+                        className="w-16 h-16 rounded-full object-cover ring-2 ring-brand-500/20 shadow-xs"
+                      />
+                    ) : (
+                      <div className="w-16 h-16 rounded-full bg-brand-100 text-brand-700 font-black text-xl flex items-center justify-center ring-2 ring-brand-500/20 shadow-xs">
+                        {user?.fullName?.charAt(0).toUpperCase() || user?.email?.charAt(0).toUpperCase() || 'U'}
+                      </div>
+                    )}
+                    {avatarLoading && (
+                      <div className="absolute inset-0 bg-white/70 rounded-full flex items-center justify-center">
+                        <div className="w-5 h-5 rounded-full border-2 border-brand-500 border-t-transparent animate-spin" />
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="space-y-1.5 flex-1">
+                    <div className="text-xs font-bold text-slate-800">Profile Photo</div>
+                    <p className="text-[11px] text-slate-500">
+                      Upload JPG, PNG, WEBP, or GIF (max 5MB).
+                    </p>
+                    <div className="flex items-center gap-2 pt-1">
+                      <label className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white border border-slate-200 text-xs font-bold text-slate-700 hover:bg-slate-100 hover:border-slate-300 shadow-xs cursor-pointer transition-colors">
+                        <Camera className="w-3.5 h-3.5 text-slate-500" />
+                        <span>{user?.avatarUrl ? 'Change Photo' : 'Upload Photo'}</span>
+                        <input
+                          type="file"
+                          accept="image/*"
+                          onChange={handleAvatarUpload}
+                          disabled={avatarLoading}
+                          className="hidden"
+                        />
+                      </label>
+                      {user?.avatarUrl && (
+                        <button
+                          type="button"
+                          onClick={handleAvatarRemove}
+                          disabled={avatarLoading}
+                          className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-xl text-xs font-semibold text-rose-600 hover:bg-rose-50 border border-transparent hover:border-rose-100 transition-colors cursor-pointer"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                          <span>Remove</span>
+                        </button>
+                      )}
+                    </div>
+                    {avatarMessage && (
+                      <div className="text-[11px] font-bold text-emerald-600 flex items-center gap-1">
+                        <Check className="w-3 h-3" /> {avatarMessage}
+                      </div>
+                    )}
+                    {avatarError && (
+                      <div className="text-[11px] font-bold text-rose-600 flex items-center gap-1">
+                        <AlertCircle className="w-3 h-3" /> {avatarError}
+                      </div>
+                    )}
+                  </div>
+                </div>
 
                 {/* Email (Read-only identity) */}
                 <div>

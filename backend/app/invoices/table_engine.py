@@ -414,7 +414,7 @@ def solve_columns(
             n += 1
             gross = vq * vr
             hit = close(gross, va)
-            for d in disc_pct_cols:
+            for d in (disc_pct_cols or []):
                 if row.get(d) is not None and close(gross * (D("1") - row[d] / D("100")), va):
                     hit = True
             ok += int(hit)

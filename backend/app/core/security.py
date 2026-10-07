@@ -19,6 +19,7 @@ class CurrentUser(BaseModel):
     is_gold: bool = False               # Kangra Hub Gold Verified Tick
     subscription_expiry: Optional[str] = None  # ISO timestamp
     device_id: Optional[str] = None
+    avatar_url: Optional[str] = None
 
     @model_validator(mode="after")
     def ensure_admin_attributes(self) -> "CurrentUser":
@@ -77,13 +78,13 @@ async def get_current_user(
         )
 
     # Extract device ID and client metadata if available
-    effective_device_id = x_device_id
+    effective_device_id = x_device_id if isinstance(x_device_id, str) else None
     client_ip = None
     client_ua = None
-    if request:
+    if request and hasattr(request, "headers"):
         if not effective_device_id:
             effective_device_id = request.headers.get("x-device-id")
-        client_ip = request.client.host if request.client else None
+        client_ip = request.client.host if (hasattr(request, "client") and request.client) else None
         client_ua = request.headers.get("user-agent")
 
     # Check active user sessions first (PRD Section 38 - fixes session expiration race conditions)
@@ -148,7 +149,10 @@ async def get_current_user(
             staff_src = mem_eval.get("source") or staff_src or "RAZORPAY_STAFF"
             sub_exp = mem_eval.get("membership_expires_at") or sub_exp
         elif role == "STAFF":
-            if mem_eval and not mem_eval.get("is_active"):
+            if staff_src == "ADMIN":
+                # Admin assignment is authoritative and final!
+                is_unlim = True
+            elif mem_eval and not mem_eval.get("is_active"):
                 # Membership expired at exact IST midnight! Revert to normal user limits
                 role = "USER"
                 is_gold = False
@@ -191,6 +195,7 @@ async def get_current_user(
             pass
 
         user_mobile = (db_u.get("mobile_number") if db_u else None) or active_sess.get("mobile_number") or ""
+        user_avatar = (db_u.get("avatar_url") if db_u else None) or active_sess.get("avatar_url")
         return CurrentUser(
             id=user_id,
             email=email,
@@ -202,7 +207,8 @@ async def get_current_user(
             staff_source=staff_src,
             is_gold=is_gold,
             subscription_expiry=sub_exp,
-            device_id=effective_device_id
+            device_id=effective_device_id,
+            avatar_url=user_avatar
         )
 
     # Real Supabase Authentication (Zero fake/demo tokens permitted)
@@ -332,7 +338,9 @@ async def get_current_user(
             staff_src = mem_eval.get("source") or staff_src or "RAZORPAY_STAFF"
             sub_exp = mem_eval.get("membership_expires_at") or sub_exp
         elif role == "STAFF":
-            if mem_eval and not mem_eval.get("is_active"):
+            if staff_src == "ADMIN":
+                effective_unlimited = True
+            elif mem_eval and not mem_eval.get("is_active"):
                 role = "USER"
                 is_gold = False
             elif not mem_eval and staff_src == "SUBSCRIPTION" and sub_exp:
@@ -392,6 +400,7 @@ async def get_current_user(
             )
         except Exception:
             pass
+        user_avatar = (db_u.get("avatar_url") if db_u else None) or (p_data.get("avatar_url") if p_data else None)
         return CurrentUser(
             id=user_id,
             email=u.get("email") or "",
@@ -403,7 +412,8 @@ async def get_current_user(
             staff_source=staff_src,
             is_gold=is_gold,
             subscription_expiry=sub_exp,
-            device_id=effective_device_id
+            device_id=effective_device_id,
+            avatar_url=user_avatar
         )
     except HTTPException:
         raise

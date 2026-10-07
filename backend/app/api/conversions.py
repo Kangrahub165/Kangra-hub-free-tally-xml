@@ -57,6 +57,14 @@ def _get_user_lock(user_id: str) -> asyncio.Lock:
 
 router = APIRouter(prefix="/conversions", tags=["Conversions"])
 
+def _maybe_persist_conversion(job: Dict[str, Any], user: CurrentUser) -> None:
+    """Persists conversion record to SQLite if user is Admin or Staff. Free users are not persisted."""
+    if user.is_admin or user.is_staff or user.role in ("ADMIN", "STAFF"):
+        try:
+            db.save_conversion(job)
+        except Exception as _e:
+            app_logger.warning(f"Failed to persist conversion {job.get('id')}: {_e}")
+
 # In-memory jobs store for reliable execution across server calls, preloaded from SQLite
 IN_MEMORY_JOBS: Dict[str, Dict[str, Any]] = {}
 try:
@@ -180,7 +188,7 @@ class ConversionJobSummary(BaseModel):
     user_id: str
     file_name: str
     bank_name: str
-    statement_format: str
+    statement_format: str = "Tally XML"
     page_count: int
     total_pdf_pages: int = 0
     pages_processed: int = 0
@@ -218,8 +226,8 @@ class ConversionJobSummary(BaseModel):
     statement_to: Optional[date] = None
     opening_balance: Optional[Decimal] = None
     closing_balance: Optional[Decimal] = None
-    total_debit: Decimal
-    total_credit: Decimal
+    total_debit: Decimal = Decimal("0.00")
+    total_credit: Decimal = Decimal("0.00")
     created_at: datetime
     override_warning: Optional[str] = None
     candidates: List[Any] = []
@@ -334,10 +342,7 @@ async def upload_statement(
         }
         job_record["user_email"] = getattr(current_user, "email", "")
         IN_MEMORY_JOBS[job_id] = job_record
-        try:
-            db.save_conversion(job_record)
-        except Exception as _e:
-            app_logger.warning(f"Failed to persist conversion {job_id}: {_e}")
+        _maybe_persist_conversion(job_record, current_user)
         return ConversionJobSummary(**job_record)
 
     # Quota Priority:
@@ -439,10 +444,7 @@ async def upload_statement(
             }
             job_record["user_email"] = getattr(current_user, "email", "")
             IN_MEMORY_JOBS[job_id] = job_record
-            try:
-                db.save_conversion(job_record)
-            except Exception as _e:
-                app_logger.warning(f"Failed to persist conversion {job_id}: {_e}")
+            _maybe_persist_conversion(job_record, current_user)
             return ConversionJobSummary(**job_record)
 
         parser = parser_registry.get_parser(detection_result.parser_key) or parser_registry.get_parser_for_bank(detected_bank_name)
@@ -586,10 +588,7 @@ async def upload_statement(
     }
     job_record["user_email"] = getattr(current_user, "email", "")
     IN_MEMORY_JOBS[job_id] = job_record
-    try:
-        db.save_conversion(job_record)
-    except Exception as _e:
-        app_logger.warning(f"Failed to persist conversion {job_id}: {_e}")
+    _maybe_persist_conversion(job_record, current_user)
 
     app_logger.info(
         f"Job {job_id} extracted {len(statement.transactions)} txs for {detected_bank_name}. Mapped: {mapped_count}, Suspense: {suspense_count}, Warnings: {warning_count}, Errors: {error_count}"
@@ -779,11 +778,7 @@ async def review_transactions(
     job.pop("excel_path", None)
     job.pop("xml_path", None)
 
-    try:
-        db.save_conversion(job)
-    except Exception as _e:
-        app_logger.warning(f"Failed to persist reviewed conversion {job.get('id')}: {_e}")
-
+    _maybe_persist_conversion(job, current_user)
     return ConversionJobSummary(**job)
 
 @router.post("/{job_id}/update-row", response_model=ConversionJobSummary)
@@ -846,11 +841,7 @@ async def update_single_row(
     job.pop("excel_path", None)
     job.pop("xml_path", None)
 
-    try:
-        db.save_conversion(job)
-    except Exception:
-        pass
-
+    _maybe_persist_conversion(job, current_user)
     return ConversionJobSummary(**job)
 
 @router.post("/{job_id}/bulk-assign-ledger", response_model=ConversionJobSummary)
@@ -980,11 +971,7 @@ async def bulk_assign_ledger(
     job.pop("excel_path", None)
     job.pop("xml_path", None)
 
-    try:
-        db.save_conversion(job)
-    except Exception:
-        pass
-
+    _maybe_persist_conversion(job, current_user)
     return ConversionJobSummary(**job)
 
 def _get_or_create_final_snapshot(
@@ -1234,17 +1221,41 @@ async def download_tally_xml_endpoint(
     current_user: CurrentUser = Depends(get_current_user)
 ):
     """Downloads the verified Tally XML file."""
+    # 1. Check in-memory jobs
     job = IN_MEMORY_JOBS.get(job_id)
-    if not job or not job.get("xml_path") or not os.path.exists(job["xml_path"]):
-        raise HTTPException(status_code=404, detail="Generated XML file not found or expired.")
-    if job["user_id"] != current_user.id and current_user.role not in ("ADMIN", "SUPER_ADMIN"):
-        raise HTTPException(status_code=403, detail="Access denied.")
+    if job and job.get("xml_path") and os.path.exists(job["xml_path"]):
+        if job["user_id"] != current_user.id and current_user.role not in ("ADMIN", "SUPER_ADMIN") and job.get("user_email") != current_user.email:
+            raise HTTPException(status_code=403, detail="Access denied.")
+        return FileResponse(
+            path=job["xml_path"],
+            filename=job.get("xml_filename") or f"{job_id}.xml",
+            media_type="application/xml"
+        )
 
-    return FileResponse(
-        path=job["xml_path"],
-        filename=job["xml_filename"],
-        media_type="application/xml"
-    )
+    # 2. Check disk xml_exports directory and SQLite database
+    from app.core.db import DATA_DIR, get_conversion_by_id
+    xml_disk_path = os.path.join(DATA_DIR, "xml_exports", f"{job_id}.xml")
+    if os.path.exists(xml_disk_path):
+        db_job = get_conversion_by_id(job_id)
+        if db_job:
+            if db_job["user_id"] != current_user.id and current_user.role not in ("ADMIN", "SUPER_ADMIN") and db_job.get("user_email") != current_user.email:
+                raise HTTPException(status_code=403, detail="Access denied.")
+            meta = {}
+            if db_job.get("metadata_json"):
+                try:
+                    meta = json.loads(db_job["metadata_json"])
+                except Exception:
+                    pass
+            filename = meta.get("xml_filename") or f"{db_job.get('file_name', 'export')}.xml"
+            if not filename.endswith(".xml"):
+                filename += ".xml"
+            return FileResponse(
+                path=xml_disk_path,
+                filename=filename,
+                media_type="application/xml"
+            )
+
+    raise HTTPException(status_code=404, detail="Generated XML file not found or expired.")
 
 @router.get("/active/recent", response_model=Optional[ConversionJobSummary])
 async def get_recent_active_conversion(current_user: CurrentUser = Depends(get_current_user)):
@@ -1567,20 +1578,84 @@ async def process_remaining_pages(
     job.pop("snapshot", None)
     job.pop("excel_path", None)
     job.pop("xml_path", None)
-
-    try:
-        db.save_conversion(job)
-    except Exception:
-        pass
-
+    _maybe_persist_conversion(job, current_user)
     return ConversionJobSummary(**job)
 
 @router.get("", response_model=List[ConversionJobSummary])
 async def list_user_conversions(current_user: CurrentUser = Depends(get_current_user)):
-    """Lists past conversion jobs for the current user."""
-    user_jobs = [j for j in IN_MEMORY_JOBS.values() if j["user_id"] == current_user.id]
-    user_jobs.sort(key=lambda x: x["created_at"], reverse=True)
-    return [ConversionJobSummary(**j) for j in user_jobs]
+    """
+    Lists past conversion jobs for the current user.
+    PRD Requirement: Normal Free users' conversion history must NOT be permanently saved.
+    Admin and Staff bill conversions MUST be permanently saved server-side and persist across sessions.
+    """
+    if not (current_user.is_admin or current_user.is_staff or current_user.role in ("ADMIN", "STAFF")):
+        return []
+
+    from app.core import db
+    db_conversions = db.get_user_conversions(current_user.id)
+    if not db_conversions and current_user.email:
+        db_conversions = db.get_user_conversions(current_user.email)
+
+    results: List[ConversionJobSummary] = []
+    seen_ids = set()
+
+    # Include matching in-memory active jobs
+    for j in IN_MEMORY_JOBS.values():
+        if j.get("user_id") == current_user.id or (current_user.email and j.get("user_email") == current_user.email):
+            seen_ids.add(j["id"])
+            try:
+                results.append(ConversionJobSummary(**j))
+            except Exception:
+                pass
+
+    for rec in db_conversions:
+        cid = rec["id"]
+        if cid in seen_ids:
+            continue
+        seen_ids.add(cid)
+
+        meta = {}
+        if rec.get("metadata_json"):
+            try:
+                meta = json.loads(rec["metadata_json"])
+            except Exception:
+                pass
+
+        tx_count = rec.get("transaction_count") or len(meta.get("transactions") or [])
+        summary = ConversionJobSummary(
+            id=cid,
+            user_id=rec["user_id"],
+            file_name=rec.get("file_name") or "Invoice",
+            bank_name=rec.get("bank_name") or "Sales & Purchase Invoices",
+            statement_format=meta.get("parser_name") or "Tally XML",
+            page_count=rec.get("total_pdf_pages") or 1,
+            total_pdf_pages=rec.get("total_pdf_pages") or 1,
+            pages_processed=rec.get("pages_processed") or 1,
+            pages_skipped=rec.get("pages_skipped") or 0,
+            pages_pending=0,
+            page_statuses={},
+            free_quota_used=rec.get("free_quota_used") or 0,
+            additional_quota_used=rec.get("additional_quota_used") or 0,
+            is_partial_conversion=bool(rec.get("is_partial_conversion", 0)),
+            remaining_pages=0,
+            suggested_additional_price=0.0,
+            transaction_count=tx_count,
+            rejected_transaction_count=0,
+            raw_transaction_count=tx_count,
+            suspense_count=0,
+            mapped_count=tx_count,
+            duplicate_count=0,
+            warning_count=0,
+            error_count=0,
+            ready_for_export=True,
+            status=rec.get("status") or "COMPLETED",
+            confidence_score=1.0,
+            created_at=rec.get("created_at")
+        )
+        results.append(summary)
+
+    results.sort(key=lambda x: str(getattr(x, "created_at", "") or ""), reverse=True)
+    return results
 
 @router.post("/unlock-pdf")
 async def unlock_pdf_endpoint(

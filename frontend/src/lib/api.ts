@@ -2289,6 +2289,7 @@ export interface UserProfileData {
   subscription_expiry?: string;
   account_status?: string;
   email_verified?: boolean;
+  avatar_url?: string;
   created_at?: string;
 }
 
@@ -2324,6 +2325,36 @@ export async function updateUserProfile(payload: {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
+  });
+}
+
+export async function uploadProfilePicture(file: File): Promise<{ success: boolean; avatar_url: string; message: string }> {
+  const formData = new FormData();
+  formData.append('file', file);
+  const token = getAuthToken();
+  const headers: Record<string, string> = {};
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
+  const res = await fetch(`${API_BASE}/auth/profile/picture`, {
+    method: 'POST',
+    headers,
+    body: formData,
+  });
+  if (!res.ok) {
+    let errMessage = 'Failed to upload profile picture';
+    try {
+      const err = await res.json();
+      errMessage = err.detail || err.message || errMessage;
+    } catch {}
+    throw new Error(errMessage);
+  }
+  return res.json();
+}
+
+export async function removeProfilePicture(): Promise<{ success: boolean; avatar_url: null; message: string }> {
+  return apiFetch('/auth/profile/picture', {
+    method: 'DELETE',
   });
 }
 

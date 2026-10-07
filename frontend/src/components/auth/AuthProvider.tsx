@@ -17,6 +17,7 @@ export interface UserSession {
   staffSource?: string;
   subscriptionExpiry?: string;
   isExpired?: boolean;
+  avatarUrl?: string;
 }
 
 interface AuthContextType {
@@ -31,6 +32,7 @@ interface AuthContextType {
   login: (token: string, isAdmin?: boolean, refreshToken?: string, user?: any) => void;
   logout: () => void;
   refreshSession: () => Promise<void>;
+  refreshProfile: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType>({
@@ -45,6 +47,7 @@ const AuthContext = createContext<AuthContextType>({
   login: () => {},
   logout: () => {},
   refreshSession: async () => {},
+  refreshProfile: async () => {},
 });
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
@@ -106,6 +109,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             staffSource: profile.staff_source,
             subscriptionExpiry: profile.subscription_expiry,
             isExpired: isExpired,
+            avatarUrl: profile.avatar_url || '',
           };
           setTokenState(storedToken);
           setUser(userObj);
@@ -237,6 +241,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         login,
         logout,
         refreshSession,
+        refreshProfile: initAuth,
       }}
     >
       {children}

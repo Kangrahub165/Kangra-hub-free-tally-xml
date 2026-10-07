@@ -54,6 +54,7 @@ def init_db():
                 suspension_delete_at TEXT,
                 suspension_reviewed_at TEXT,
                 suspension_reviewed_by TEXT,
+                avatar_url TEXT,
                 created_at TEXT,
                 updated_at TEXT
             );
@@ -385,7 +386,8 @@ def init_db():
                 ("staff_source", "TEXT DEFAULT NULL"),
                 ("is_gold", "INTEGER DEFAULT 0"),
                 ("subscription_expiry", "TEXT DEFAULT NULL"),
-                ("device_id", "TEXT DEFAULT NULL")
+                ("device_id", "TEXT DEFAULT NULL"),
+                ("avatar_url", "TEXT DEFAULT NULL")
             ]:
                 try:
                     cursor.execute(f"ALTER TABLE users ADD COLUMN {col} {dtype};")
@@ -1656,7 +1658,8 @@ def update_user_profile(
     user_id: str,
     full_name: Optional[str] = None,
     mobile_number: Optional[str] = None,
-    gender: Optional[str] = None
+    gender: Optional[str] = None,
+    avatar_url: Optional[str] = None
 ) -> Optional[Dict[str, Any]]:
     """Updates a user's editable profile fields in SQLite users table."""
     now_iso = datetime.now(timezone.utc).isoformat()
@@ -1664,7 +1667,7 @@ def update_user_profile(
         conn = _get_connection()
         try:
             cursor = conn.cursor()
-            cursor.execute("SELECT * FROM users WHERE id = ? OR email = ?", (user_id, user_id))
+            cursor.execute("SELECT * FROM users WHERE id = ? OR LOWER(email) = ?", (user_id, user_id.lower()))
             user = cursor.fetchone()
             if not user:
                 return None
@@ -1683,6 +1686,9 @@ def update_user_profile(
             if gender is not None and gender.strip():
                 updates.append("gender = ?")
                 params.append(gender.strip())
+            if avatar_url is not None:
+                updates.append("avatar_url = ?")
+                params.append(avatar_url.strip() if avatar_url.strip() else None)
 
             params.append(user["id"])
             cursor.execute(f"UPDATE users SET {', '.join(updates)} WHERE id = ?", params)
@@ -1697,6 +1703,22 @@ def update_user_profile(
                 d["mobile_verified"] = bool(d.get("mobile_verified"))
                 return d
             return None
+        finally:
+            conn.close()
+
+def set_user_avatar(user_id: str, avatar_url: Optional[str]) -> bool:
+    """Updates or removes the user's avatar URL in SQLite users table."""
+    now_iso = datetime.now(timezone.utc).isoformat()
+    with _LOCK:
+        conn = _get_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute("""
+            UPDATE users SET avatar_url = ?, updated_at = ?
+            WHERE id = ? OR LOWER(email) = ?
+            """, (avatar_url, now_iso, user_id, user_id.lower()))
+            conn.commit()
+            return cursor.rowcount > 0
         finally:
             conn.close()
 
@@ -2178,32 +2200,109 @@ def add_user_to_staff(
 ) -> bool:
     """
     Adds user to Staff group:
-    PRD Section 7: Staff added manually by admin = Staff without Gold Tick.
+    PRD Section 7: Staff added manually by admin = Staff without Gold Tick (unless is_gold=True).
     Unlimited bills, no admin powers, no daily limit counters.
+    Authoritatively persists to SQLite users table, staff_memberships table, in-memory cache, and Supabase.
     """
     now_iso = datetime.now(timezone.utc).isoformat()
+    effective_expiry = expiry or "2099-12-31T23:59:59+00:00"
+    last_valid = (expiry[:10] if expiry else "2099-12-31")
     with _LOCK:
         conn = _get_connection()
         try:
             cursor = conn.cursor()
-            cursor.execute("SELECT * FROM users WHERE id = ? OR email = ?", (user_id, user_id.lower()))
+            cursor.execute("SELECT * FROM users WHERE id = ? OR LOWER(email) = ?", (user_id, user_id.lower()))
             u = cursor.fetchone()
             if not u:
                 return False
             u_dict = dict(u)
             uid = u_dict["id"]
             email = u_dict["email"]
+            name = u_dict.get("full_name") or u_dict.get("username") or email.split("@")[0]
+            phone = u_dict.get("mobile_number") or ""
 
+            # 1. Update users table
             cursor.execute("""
             UPDATE users SET
                 role = 'STAFF',
                 staff_source = ?,
                 is_gold = ?,
+                is_unlimited = 1,
                 subscription_expiry = ?,
                 updated_at = ?
             WHERE id = ?
             """, (source, 1 if is_gold else 0, expiry, now_iso, uid))
+
+            # 2. Upsert staff_memberships table
+            cursor.execute("SELECT id FROM staff_memberships WHERE user_id = ? OR LOWER(user_email) = ?", (uid, email.lower()))
+            existing_mem = cursor.fetchone()
+            if existing_mem:
+                cursor.execute("""
+                UPDATE staff_memberships SET
+                    user_id = ?,
+                    user_email = ?,
+                    user_name = ?,
+                    staff_status = 'ACTIVE',
+                    membership_started_at = ?,
+                    membership_expires_at = ?,
+                    last_valid_day = ?,
+                    is_gold = ?,
+                    updated_at = ?
+                WHERE id = ?
+                """, (
+                    uid, email, name, now_iso, effective_expiry, last_valid,
+                    1 if is_gold else 0, now_iso, existing_mem["id"]
+                ))
+            else:
+                mem_id = f"mem_adm_{uuid.uuid4().hex[:12]}"
+                cursor.execute("""
+                INSERT INTO staff_memberships (
+                    id, user_id, user_email, user_name, customer_phone, staff_status,
+                    membership_started_at, membership_expires_at, last_valid_day,
+                    is_gold, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, 'ACTIVE', ?, ?, ?, ?, ?, ?)
+                """, (
+                    mem_id, uid, email, name, phone,
+                    now_iso, effective_expiry, last_valid,
+                    1 if is_gold else 0, now_iso, now_iso
+                ))
+
             conn.commit()
+
+            # 3. Synchronize in-memory cache and active sessions immediately
+            try:
+                from app.core import user_store
+                with user_store._LOCK:
+                    if uid in user_store.REGISTERED_USERS:
+                        user_store.REGISTERED_USERS[uid].update({
+                            "role": "STAFF",
+                            "is_unlimited": True,
+                            "is_gold": bool(is_gold),
+                            "staff_source": source,
+                            "subscription_expiry": expiry
+                        })
+                    for token, sess in list(user_store.ACTIVE_SESSIONS.items()):
+                        if sess.get("user_id") == uid or (sess.get("email") and sess.get("email").lower() == email.lower()):
+                            sess["role"] = "STAFF"
+                            sess["is_unlimited"] = True
+                            sess["is_gold"] = bool(is_gold)
+                            sess["staff_source"] = source
+                            sess["subscription_expiry"] = expiry
+            except Exception as _sync_err:
+                logger.warning(f"Error syncing in-memory staff state: {_sync_err}")
+
+            # 4. Synchronize Supabase profile
+            try:
+                from app.core.supabase_service import SupabaseService
+                if SupabaseService.is_configured():
+                    SupabaseService.upsert_profile({
+                        "id": uid,
+                        "role": "STAFF",
+                        "is_gold": bool(is_gold),
+                        "is_unlimited": True
+                    })
+            except Exception as _sb_err:
+                logger.warning(f"Error syncing staff status to Supabase: {_sb_err}")
 
             log_staff_action(
                 admin_id=admin_id,
@@ -2221,13 +2320,14 @@ def remove_user_from_staff(user_id: str, admin_id: str, admin_name: str) -> bool
     """
     Removes user from Staff group:
     Reverts role to 'USER', strips Gold Tick, restores 5 bills/day limit immediately.
+    Authoritatively updates SQLite users, staff_memberships table, in-memory cache, and Supabase.
     """
     now_iso = datetime.now(timezone.utc).isoformat()
     with _LOCK:
         conn = _get_connection()
         try:
             cursor = conn.cursor()
-            cursor.execute("SELECT * FROM users WHERE id = ? OR email = ?", (user_id, user_id.lower()))
+            cursor.execute("SELECT * FROM users WHERE id = ? OR LOWER(email) = ?", (user_id, user_id.lower()))
             u = cursor.fetchone()
             if not u:
                 return False
@@ -2235,16 +2335,63 @@ def remove_user_from_staff(user_id: str, admin_id: str, admin_name: str) -> bool
             uid = u_dict["id"]
             email = u_dict["email"]
 
+            # 1. Update users table
             cursor.execute("""
             UPDATE users SET
                 role = 'USER',
                 staff_source = NULL,
                 is_gold = 0,
+                is_unlimited = 0,
                 subscription_expiry = NULL,
                 updated_at = ?
             WHERE id = ?
             """, (now_iso, uid))
+
+            # 2. Update staff_memberships table to CANCELLED
+            cursor.execute("""
+            UPDATE staff_memberships SET
+                staff_status = 'CANCELLED',
+                is_gold = 0,
+                updated_at = ?
+            WHERE user_id = ? OR LOWER(user_email) = ?
+            """, (now_iso, uid, email.lower()))
+
             conn.commit()
+
+            # 3. Synchronize in-memory cache and active sessions immediately
+            try:
+                from app.core import user_store
+                with user_store._LOCK:
+                    if uid in user_store.REGISTERED_USERS:
+                        user_store.REGISTERED_USERS[uid].update({
+                            "role": "USER",
+                            "is_unlimited": False,
+                            "is_gold": False,
+                            "staff_source": None,
+                            "subscription_expiry": None
+                        })
+                    for token, sess in list(user_store.ACTIVE_SESSIONS.items()):
+                        if sess.get("user_id") == uid or (sess.get("email") and sess.get("email").lower() == email.lower()):
+                            sess["role"] = "USER"
+                            sess["is_unlimited"] = False
+                            sess["is_gold"] = False
+                            sess["staff_source"] = None
+                            sess["subscription_expiry"] = None
+            except Exception as _sync_err:
+                logger.warning(f"Error syncing in-memory staff state: {_sync_err}")
+
+            # 4. Synchronize Supabase profile
+            try:
+                from app.core.supabase_service import SupabaseService
+                if SupabaseService.is_configured():
+                    SupabaseService.upsert_profile({
+                        "id": uid,
+                        "role": "USER",
+                        "is_gold": False,
+                        "is_unlimited": False
+                    })
+            except Exception as _sb_err:
+                logger.warning(f"Error syncing staff removal to Supabase: {_sb_err}")
 
             log_staff_action(
                 admin_id=admin_id,
@@ -2513,8 +2660,14 @@ def get_staff_membership_with_status_eval(
                 except Exception as sync_err:
                     logger.debug(f"Error syncing user_id across membership tables: {sync_err}")
 
-            exp_utc = parse_iso_to_utc(mem["membership_expires_at"])
+            # Respect cancelled or revoked admin actions
+            if mem.get("staff_status") in ("CANCELLED", "REVOKED", "EXPIRED", "SUSPENDED"):
+                mem["is_active"] = False
+                return mem
+
+            exp_utc = parse_iso_to_utc(mem.get("membership_expires_at"))
             if not exp_utc:
+                mem["is_active"] = (mem.get("staff_status") == "ACTIVE")
                 return mem
 
             # Re-evaluate status against server time
@@ -2557,8 +2710,9 @@ def get_staff_membership_with_status_eval(
 
                 mem["is_active"] = False
             else:
-                mem["is_active"] = True
-                mem["staff_status"] = "ACTIVE"
+                mem["is_active"] = (mem.get("staff_status") == "ACTIVE")
+                if mem.get("staff_status") != "CANCELLED":
+                    mem["staff_status"] = "ACTIVE"
 
             # Compute standardized display wording
             exp_ist = exp_utc.astimezone(IST)

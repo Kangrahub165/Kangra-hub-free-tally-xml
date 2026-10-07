@@ -415,34 +415,51 @@ async def generate_invoice_xml_endpoint(
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         filename = f"KangraHub_Sales_Purchase_Import_{timestamp}.xml"
 
-    # Record conversion history for dashboard tracking
-    job_id = uuid4().hex
-    try:
-        filenames = [d.source_filename for d in snapshot.invoices if d.source_filename]
-        display_name = ", ".join(filenames[:2]) + (f" (+{len(filenames)-2} more)" if len(filenames) > 2 else "")
-        db.save_conversion({
-            "id": job_id,
-            "user_id": user.id,
-            "user_email": getattr(user, "email", ""),
-            "file_name": display_name or filename,
-            "bank_name": "Sales & Purchase Invoices",
-            "total_pdf_pages": sum(getattr(d, "source_page_count", 1) for d in snapshot.invoices),
-            "pages_processed": len(snapshot.invoices),
-            "pages_skipped": 0,
-            "free_quota_used": charge_info["new_bills_charged"],
-            "additional_quota_used": 0,
-            "transaction_count": sum(len(d.items) for d in snapshot.invoices),
-            "status": "COMPLETED",
-            "metadata": {
-                "bill_count": len(snapshot.invoices),
-                "total_amount": float(summary.total_invoice_amount) if summary else 0.0
-            }
-        })
-    except Exception as e:
-        app_logger.warning(f"Unable to record conversion history for invoices: {e}")
+    # PRD Requirement: Admin and Staff bill conversions MUST be permanently saved server-side.
+    # Normal Free users' conversion history must NOT be permanently saved.
+    is_staff_or_admin = user.is_admin or user.is_staff or user.role in ("ADMIN", "STAFF")
+    job_id = None
+    if is_staff_or_admin:
+        job_id = uuid4().hex
+        from app.core.db import DATA_DIR
+        xml_storage_dir = os.path.join(DATA_DIR, "xml_exports")
+        os.makedirs(xml_storage_dir, exist_ok=True)
+        xml_path = os.path.join(xml_storage_dir, f"{job_id}.xml")
+        try:
+            with open(xml_path, "w", encoding="utf-8") as xf:
+                xf.write(xml_str)
+        except Exception as _fe:
+            app_logger.warning(f"Could not persist XML file to disk: {_fe}")
+
+        try:
+            filenames = [d.source_filename for d in snapshot.invoices if d.source_filename]
+            display_name = ", ".join(filenames[:2]) + (f" (+{len(filenames)-2} more)" if len(filenames) > 2 else "")
+            db.save_conversion({
+                "id": job_id,
+                "user_id": user.id,
+                "user_email": getattr(user, "email", ""),
+                "file_name": display_name or filename,
+                "bank_name": "Sales & Purchase Invoices",
+                "total_pdf_pages": sum(getattr(d, "source_page_count", 1) for d in snapshot.invoices),
+                "pages_processed": len(snapshot.invoices),
+                "pages_skipped": 0,
+                "free_quota_used": charge_info["new_bills_charged"],
+                "additional_quota_used": 0,
+                "transaction_count": sum(len(d.items) for d in snapshot.invoices),
+                "status": "COMPLETED",
+                "metadata": {
+                    "bill_count": len(snapshot.invoices),
+                    "total_amount": float(getattr(summary, "total_invoice_value", getattr(summary, "total_grand", 0.0))) if summary else 0.0,
+                    "xml_path": xml_path,
+                    "xml_filename": filename
+                }
+            })
+        except Exception as e:
+            app_logger.warning(f"Unable to record conversion history for invoices: {e}")
 
     return {
         "success": is_valid,
+        "job_id": job_id,
         "filename": filename,
         "is_valid": is_valid,
         "validation_errors": validation_errors,
@@ -459,6 +476,7 @@ async def download_invoice_xml_endpoint(
     """
     Generates and downloads the Tally XML file as an attachment.
     Enforces conversion confirmation credit deduction and pre-export XML validation.
+    Permanently records conversion history for Admin and Staff users.
     """
     if not snapshot.invoices:
         raise HTTPException(
@@ -493,6 +511,47 @@ async def download_invoice_xml_endpoint(
     else:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         filename = f"KangraHub_Sales_Purchase_Import_{timestamp}.xml"
+
+    # PRD Requirement: Admin and Staff bill conversions MUST be permanently saved server-side.
+    is_staff_or_admin = user.is_admin or user.is_staff or user.role in ("ADMIN", "STAFF")
+    if is_staff_or_admin:
+        job_id = uuid4().hex
+        from app.core.db import DATA_DIR
+        xml_storage_dir = os.path.join(DATA_DIR, "xml_exports")
+        os.makedirs(xml_storage_dir, exist_ok=True)
+        xml_path = os.path.join(xml_storage_dir, f"{job_id}.xml")
+        try:
+            with open(xml_path, "w", encoding="utf-8") as xf:
+                xf.write(xml_str)
+        except Exception as _fe:
+            pass
+
+        try:
+            summary = compute_batch_summary(snapshot.invoices)
+            filenames = [d.source_filename for d in snapshot.invoices if d.source_filename]
+            display_name = ", ".join(filenames[:2]) + (f" (+{len(filenames)-2} more)" if len(filenames) > 2 else "")
+            db.save_conversion({
+                "id": job_id,
+                "user_id": user.id,
+                "user_email": getattr(user, "email", ""),
+                "file_name": display_name or filename,
+                "bank_name": "Sales & Purchase Invoices",
+                "total_pdf_pages": sum(getattr(d, "source_page_count", 1) for d in snapshot.invoices),
+                "pages_processed": len(snapshot.invoices),
+                "pages_skipped": 0,
+                "free_quota_used": 0,
+                "additional_quota_used": 0,
+                "transaction_count": sum(len(d.items) for d in snapshot.invoices),
+                "status": "COMPLETED",
+                "metadata": {
+                    "bill_count": len(snapshot.invoices),
+                    "total_amount": float(getattr(summary, "total_invoice_value", getattr(summary, "total_grand", 0.0))) if summary else 0.0,
+                    "xml_path": xml_path,
+                    "xml_filename": filename
+                }
+            })
+        except Exception as e:
+            app_logger.warning(f"Unable to record conversion history for invoices: {e}")
 
     return Response(
         content=xml_str.encode("utf-8"),

@@ -244,13 +244,23 @@ export function Header() {
                         : 'text-slate-700 hover:text-brand-600 hover:bg-slate-100'
                     }`}
                   >
-                    <span className={`w-7 h-7 rounded-full flex items-center justify-center font-black text-[11px] ${
-                      isGold
-                        ? 'bg-amber-400/20 text-amber-300 ring-1 ring-amber-400/50'
-                        : 'bg-brand-100 text-brand-700'
-                    }`}>
-                      {user?.fullName?.charAt(0).toUpperCase() || user?.email?.charAt(0).toUpperCase() || 'U'}
-                    </span>
+                    {user?.avatarUrl ? (
+                      <img
+                        src={user.avatarUrl}
+                        alt="Profile avatar"
+                        className={`w-7 h-7 rounded-full object-cover ${
+                          isGold ? 'ring-1 ring-amber-400/80 shadow-xs' : 'ring-1 ring-slate-200'
+                        }`}
+                      />
+                    ) : (
+                      <span className={`w-7 h-7 rounded-full flex items-center justify-center font-black text-[11px] ${
+                        isGold
+                          ? 'bg-amber-400/20 text-amber-300 ring-1 ring-amber-400/50'
+                          : 'bg-brand-100 text-brand-700'
+                      }`}>
+                        {user?.fullName?.charAt(0).toUpperCase() || user?.email?.charAt(0).toUpperCase() || 'U'}
+                      </span>
+                    )}
                     <span className="max-w-[120px] truncate">{user?.fullName || user?.email?.split('@')[0] || (isAdmin ? 'Admin' : 'My Account')}</span>
                     {isGold && <GoldTick size="sm" />}
                     {isAdmin && (

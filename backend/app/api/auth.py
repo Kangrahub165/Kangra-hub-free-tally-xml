@@ -1,7 +1,9 @@
 import logging
 import uuid
+import os
 from typing import Optional, Dict, Any
-from fastapi import APIRouter, HTTPException, Request, Depends, status
+from fastapi import APIRouter, HTTPException, Request, Depends, status, UploadFile, File
+from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel
 from app.core.config import settings
 from app.core.otp_service import otp_service
@@ -963,6 +965,7 @@ async def get_current_auth_user(current_user: CurrentUser = Depends(get_current_
         "gender": db_user.get("gender") or "Not specified",
         "account_status": db_user.get("account_status", "ACTIVE"),
         "email_verified": db_user.get("email_verified", True),
+        "avatar_url": db_user.get("avatar_url") or getattr(current_user, "avatar_url", None),
         "created_at": db_user.get("registration_date") or db_user.get("created_at")
     }
 
@@ -1051,7 +1054,181 @@ async def update_current_user_profile(
             "mobile_number": (updated or {}).get("mobile_number") or clean_mobile or current_user.mobile_number,
             "gender": (updated or {}).get("gender") or payload.gender or "Not specified",
             "role": current_user.role,
-            "is_unlimited": current_user.is_unlimited
+            "is_unlimited": current_user.is_unlimited,
+            "avatar_url": (updated or {}).get("avatar_url") or current_user.avatar_url
         }
     }
+
+AVATARS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "data", "uploads", "avatars")
+os.makedirs(AVATARS_DIR, exist_ok=True)
+
+@router.post("/profile/picture")
+async def upload_profile_picture(
+    file: UploadFile = File(...),
+    current_user: CurrentUser = Depends(get_current_user)
+):
+    """
+    Uploads or updates the authenticated user's profile picture.
+    Stores the image server-side in persistent storage and associates it with the user account.
+    """
+    if not file or not file.filename:
+        raise HTTPException(status_code=400, detail="No file uploaded.")
+
+    allowed_exts = {".jpg", ".jpeg", ".png", ".webp", ".gif"}
+    ext = os.path.splitext(file.filename.lower())[1]
+    if ext not in allowed_exts:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid image file extension '{ext}'. Allowed formats: JPG, PNG, WEBP, GIF."
+        )
+
+    content = await file.read()
+    if len(content) == 0:
+        raise HTTPException(status_code=400, detail="Uploaded file is empty.")
+    if len(content) > 5 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="Image size exceeds 5MB limit.")
+
+    clean_uid = "".join(c for c in current_user.id if c.isalnum() or c in ("-", "_"))
+    filename = f"avatar_{clean_uid}_{uuid.uuid4().hex[:8]}{ext}"
+    dest_path = os.path.join(AVATARS_DIR, filename)
+
+    try:
+        with open(dest_path, "wb") as f:
+            f.write(content)
+    except Exception as e:
+        logger.error(f"Failed to save profile picture: {e}")
+        raise HTTPException(status_code=500, detail="Failed to save profile picture on server.")
+
+    avatar_url = f"/api/auth/profile/picture/{filename}"
+
+    # Remove old avatar file if replacing
+    from app.core.db import get_user_by_id_or_email, set_user_avatar, add_user_activity_log
+    db_u = get_user_by_id_or_email(current_user.id) or {}
+    old_avatar = db_u.get("avatar_url") or current_user.avatar_url
+    if old_avatar and "/api/auth/profile/picture/" in old_avatar:
+        old_filename = old_avatar.split("/api/auth/profile/picture/")[-1]
+        old_path = os.path.join(AVATARS_DIR, os.path.basename(old_filename))
+        if os.path.exists(old_path) and os.path.abspath(old_path) != os.path.abspath(dest_path):
+            try:
+                os.remove(old_path)
+            except Exception as _rm_e:
+                logger.warning(f"Failed to remove replaced avatar file: {_rm_e}")
+
+    # Update in SQLite users table
+    set_user_avatar(current_user.id, avatar_url)
+
+    # Sync into in-memory store & sessions
+    from app.core import user_store
+    with user_store._LOCK:
+        if current_user.id in user_store.REGISTERED_USERS:
+            user_store.REGISTERED_USERS[current_user.id]["avatar_url"] = avatar_url
+        for sess in user_store.ACTIVE_SESSIONS.values():
+            if sess.get("user_id") == current_user.id or sess.get("email") == current_user.email:
+                sess["avatar_url"] = avatar_url
+
+    # Sync to Supabase profile if configured
+    from app.core.supabase_service import SupabaseService
+    if SupabaseService.is_configured():
+        try:
+            SupabaseService.upsert_profile({
+                "id": current_user.id,
+                "avatar_url": avatar_url
+            })
+        except Exception as _sb_e:
+            logger.warning(f"Could not sync avatar to Supabase: {_sb_e}")
+
+    add_user_activity_log(
+        user_id=current_user.id,
+        user_email=current_user.email,
+        action="AVATAR_UPLOADED",
+        module="USER_PROFILE",
+        resource_id=current_user.id,
+        status="SUCCESS",
+        metadata={"filename": filename, "avatar_url": avatar_url}
+    )
+
+    return {
+        "success": True,
+        "avatar_url": avatar_url,
+        "message": "Profile picture updated successfully."
+    }
+
+@router.get("/profile/picture/{filename}")
+async def get_profile_picture(filename: str):
+    """Serves the user's profile picture with secure caching."""
+    clean_name = os.path.basename(filename)
+    file_path = os.path.join(AVATARS_DIR, clean_name)
+    if not os.path.exists(file_path):
+        raise HTTPException(status_code=404, detail="Profile picture not found.")
+
+    ext = os.path.splitext(clean_name.lower())[1]
+    media_types = {
+        ".jpg": "image/jpeg",
+        ".jpeg": "image/jpeg",
+        ".png": "image/png",
+        ".webp": "image/webp",
+        ".gif": "image/gif"
+    }
+    media_type = media_types.get(ext, "application/octet-stream")
+
+    return FileResponse(
+        path=file_path,
+        media_type=media_type,
+        headers={"Cache-Control": "public, max-age=86400"}
+    )
+
+@router.delete("/profile/picture")
+async def delete_profile_picture(current_user: CurrentUser = Depends(get_current_user)):
+    """Removes the authenticated user's profile picture."""
+    from app.core.db import get_user_by_id_or_email, set_user_avatar, add_user_activity_log
+    db_u = get_user_by_id_or_email(current_user.id) or {}
+    old_avatar = db_u.get("avatar_url") or current_user.avatar_url
+
+    if old_avatar and "/api/auth/profile/picture/" in old_avatar:
+        old_filename = old_avatar.split("/api/auth/profile/picture/")[-1]
+        old_path = os.path.join(AVATARS_DIR, os.path.basename(old_filename))
+        if os.path.exists(old_path):
+            try:
+                os.remove(old_path)
+            except Exception as e:
+                logger.warning(f"Failed to remove old avatar file: {e}")
+
+    set_user_avatar(current_user.id, None)
+
+    # Sync in-memory store & sessions
+    from app.core import user_store
+    with user_store._LOCK:
+        if current_user.id in user_store.REGISTERED_USERS:
+            user_store.REGISTERED_USERS[current_user.id]["avatar_url"] = None
+        for sess in user_store.ACTIVE_SESSIONS.values():
+            if sess.get("user_id") == current_user.id or sess.get("email") == current_user.email:
+                sess["avatar_url"] = None
+
+    # Sync to Supabase profile
+    from app.core.supabase_service import SupabaseService
+    if SupabaseService.is_configured():
+        try:
+            SupabaseService.upsert_profile({
+                "id": current_user.id,
+                "avatar_url": None
+            })
+        except Exception as _sb_e:
+            logger.warning(f"Could not clear avatar in Supabase: {_sb_e}")
+
+    add_user_activity_log(
+        user_id=current_user.id,
+        user_email=current_user.email,
+        action="AVATAR_REMOVED",
+        module="USER_PROFILE",
+        resource_id=current_user.id,
+        status="SUCCESS",
+        metadata={}
+    )
+
+    return {
+        "success": True,
+        "avatar_url": None,
+        "message": "Profile picture removed successfully."
+    }
+
 
