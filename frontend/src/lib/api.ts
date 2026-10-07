@@ -2277,13 +2277,16 @@ export interface StockItemTallyPreview {
   parent_group: string;
   base_unit: string;
   alternate_unit?: string | null;
+  has_alternate_units?: boolean;
   conversion?: number | null;
   conversion_formula?: string | null;
   hsn_code?: string | null;
   hsn_description?: string | null;
   hsn_source: string;
   taxability: string;
+  gst_applicability?: string;
   gst_source: string;
+  gst_rate_source?: string;
   gst_rate: number;
   cgst_rate: number;
   sgst_rate: number;

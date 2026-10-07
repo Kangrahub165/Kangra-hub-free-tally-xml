@@ -5,6 +5,7 @@ from html.parser import HTMLParser
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from typing import List, Dict, Optional, Tuple, Any, Set
 from pydantic import BaseModel, Field
+from datetime import datetime, timezone
 from difflib import SequenceMatcher
 
 from app.accounting.ledger_importer import sanitize_xml_content, decode_ledger_file
@@ -376,10 +377,14 @@ class GlobalStockItemStore:
     """Thread-safe in-memory store for user-imported Tally stock items."""
     def __init__(self):
         self._user_items: Dict[str, Dict[str, ImportedStockItem]] = {}
+        self._import_timestamps: Dict[str, datetime] = {}
 
     def add_items(self, user_id: str, items: List[ImportedStockItem]) -> int:
         if user_id not in self._user_items:
             self._user_items[user_id] = {}
+        now = datetime.now(timezone.utc)
+        self._import_timestamps[user_id] = now
+        self._import_timestamps["default_session"] = now
         added = 0
         for it in items:
             if it.normalized_name not in self._user_items[user_id]:
@@ -604,10 +609,14 @@ class GlobalStockItemStore:
 
     def get_stock_groups(self, user_id: str) -> List[Dict[str, Any]]:
         """
-        PRD Addendum 5: Returns distinct Stock Groups (parents) from imported Tally items,
-        sorted with "Primary" first, then alphabetically, with item counts.
+        PRD Addendum 5 & 7: Returns distinct Stock Groups (parents) from imported Tally items,
+        sorted with "Primary" first, then alphabetically, with item counts and import timestamp.
+        Returns empty list if no stock items have been imported yet.
         """
         all_items = self.get_items(user_id, limit=None)
+        if not all_items:
+            return []
+
         counts: Dict[str, int] = {}
         for it in all_items:
             grp = (it.parent or "Primary").strip()
@@ -617,31 +626,42 @@ class GlobalStockItemStore:
         if "Primary" not in counts:
             counts["Primary"] = 0
 
-        result = [{"name": "Primary", "item_count": counts.get("Primary", 0)}]
+        ts = self._import_timestamps.get(user_id) or self._import_timestamps.get("default_session") or datetime.now(timezone.utc)
+        import_str = ts.strftime("%d %b")
+
+        result = [{"name": "Primary", "item_count": counts.get("Primary", 0), "imported_at": import_str}]
         for grp_name in sorted(counts.keys(), key=lambda s: s.lower()):
             if grp_name != "Primary":
-                result.append({"name": grp_name, "item_count": counts[grp_name]})
+                result.append({"name": grp_name, "item_count": counts[grp_name], "imported_at": import_str})
 
         return result
 
     def get_stock_units(self, user_id: str) -> List[Dict[str, Any]]:
         """
-        Returns distinct base units from imported Tally items with counts.
+        PRD Addendum 7 Section 2: Returns ONLY distinct base units and alternate units
+        that actually exist in the user's imported Tally items with counts and import timestamp.
+        No hardcoded or default units are injected. Returns empty list if no items imported.
         """
         all_items = self.get_items(user_id, limit=None)
+        if not all_items:
+            return []
+
         counts: Dict[str, int] = {}
         for it in all_items:
-            u = (it.base_units or "NOS").strip()
-            if u:
-                counts[u] = counts.get(u, 0) + 1
+            if it.base_units:
+                u = it.base_units.strip().upper()
+                if u and not u.startswith("NOT"):
+                    counts[u] = counts.get(u, 0) + 1
+            if it.additional_units:
+                alt = it.additional_units.strip().upper()
+                if alt and not alt.startswith("NOT"):
+                    counts[alt] = counts.get(alt, 0) + 1
 
-        standard = ["NOS", "PCS", "CASE", "BOX", "BTL", "KG", "LTR", "PKT", "DOZ", "BAG", "CAN", "SET", "GM"]
-        for s in standard:
-            if s not in counts:
-                counts[s] = 0
+        ts = self._import_timestamps.get(user_id) or self._import_timestamps.get("default_session") or datetime.now(timezone.utc)
+        import_str = ts.strftime("%d %b")
 
         sorted_units = sorted(counts.items(), key=lambda x: (-x[1], x[0]))
-        return [{"name": name, "item_count": count} for name, count in sorted_units]
+        return [{"name": name, "item_count": count, "imported_at": import_str} for name, count in sorted_units]
 
     def generate_new_stock_item_xml(
         self,
