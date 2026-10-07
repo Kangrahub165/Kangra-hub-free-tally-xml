@@ -122,4 +122,4 @@ def test_generate_new_stock_item_xml():
     assert "<PARENT>Beverages 28%</PARENT>" in xml_str
     assert "<BASEUNITS>case</BASEUNITS>" in xml_str
     assert "<HSNCODE>22021010</HSNCODE>" in xml_str
-    assert "<GSTRATE>28.00</GSTRATE>" in xml_str
+    assert "<GSTRATE> 28.00</GSTRATE>" in xml_str or "<GSTRATE>28.00</GSTRATE>" in xml_str

@@ -1867,14 +1867,16 @@ class InvoiceExtractor:
 
         detected_item_rows_count = 0
 
-        # Infer fallback tax rates from totals (used only when per-item rates not available)
-        cgst_r, sgst_r, igst_r = Decimal("0.00"), Decimal("0.00"), Decimal("0.00")
+        # PRD Addendum 5: Inferred single invoice slab from totals (used ONLY if whole invoice is single slab)
+        single_invoice_slab = None
         if totals['taxable_total'] > Decimal("0.00"):
-            if totals['cgst_total'] > Decimal("0.00"):
-                cgst_r = (totals['cgst_total'] / totals['taxable_total'] * Decimal("100")).quantize(Decimal("0.01"))
-                sgst_r = (totals['sgst_total'] / totals['taxable_total'] * Decimal("100")).quantize(Decimal("0.01"))
-            elif totals['igst_total'] > Decimal("0.00"):
-                igst_r = (totals['igst_total'] / totals['taxable_total'] * Decimal("100")).quantize(Decimal("0.01"))
+            tot_tax_sum = (totals.get('cgst_total') or Decimal("0.00")) + (totals.get('sgst_total') or Decimal("0.00")) + (totals.get('igst_total') or Decimal("0.00"))
+            if tot_tax_sum > Decimal("0.00"):
+                inferred_full_rate = (tot_tax_sum / totals['taxable_total'] * Decimal("100")).quantize(Decimal("0.01"))
+                for std_s in (Decimal("5.00"), Decimal("12.00"), Decimal("18.00"), Decimal("28.00")):
+                    if abs(inferred_full_rate - std_s) <= Decimal("0.35"):
+                        single_invoice_slab = std_s
+                        break
 
         # Build comprehensive column map from ALL header rows (main + sub-header)
         cols = {}
@@ -2120,6 +2122,7 @@ class InvoiceExtractor:
             item_name = None
             row_billed_qty = None
             row_shipped_qty = None
+            row_gst_rate = None
             row_cgst_rate = None
             row_cgst_amt = None
             row_sgst_rate = None
@@ -2197,13 +2200,20 @@ class InvoiceExtractor:
                     # GST Rate (combined column like "GST %" or "Tax Rate") → split into CGST/SGST
                     elif 'gst_rate' in cols and cols['gst_rate'][0] <= x <= cols['gst_rate'][1]:
                         pct = extract_gst_percentage(t_text)
-                        if pct is not None and pct > Decimal("0.00"):
-                            # Split combined rate into CGST + SGST halves
-                            half = (pct / Decimal("2.00")).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
-                            if row_cgst_rate is None:
-                                row_cgst_rate = half
-                            if row_sgst_rate is None:
-                                row_sgst_rate = pct - half
+                        if pct is not None:
+                            row_gst_rate = pct
+                            if pct > Decimal("0.00"):
+                                # Split combined rate into CGST + SGST halves
+                                half = (pct / Decimal("2.00")).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+                                if row_cgst_rate is None:
+                                    row_cgst_rate = half
+                                if row_sgst_rate is None:
+                                    row_sgst_rate = pct - half
+                            else:
+                                # PRD Addendum 5: 0% tax-free line must stay 0%
+                                row_cgst_rate = Decimal("0.00")
+                                row_sgst_rate = Decimal("0.00")
+                                row_igst_rate = Decimal("0.00")
 
                     # Taxable Value (distinct from Amount)
                     elif 'taxable_value' in cols and cols['taxable_value'][0] <= x <= cols['taxable_value'][1]:
@@ -2325,12 +2335,8 @@ class InvoiceExtractor:
                         qty = base_qty if base_qty else Decimal("1.00")
                         hsn = row_hsn
                         item_name = desc_str
-                        # Store per-item GST rates/amounts (will be used below instead of inferred rates)
-                        if row_cgst_rate is not None:
-                            cgst_r = row_cgst_rate
-                            sgst_r = row_sgst_rate if row_sgst_rate is not None else row_cgst_rate
-                        if row_cgst_amt is not None:
-                            pass  # Will be used directly in item creation
+                        # PRD Addendum 5: Do NOT mutate outer cgst_r / sgst_r. Rates are strictly isolated per row.
+                        pass
 
                         # Arithmetic verification of column mapping:
                         # Check if qty * rate is wildly inconsistent with taxable (e.g. MRP or HSN pollution).
@@ -2552,38 +2558,77 @@ class InvoiceExtractor:
             if not row_pack_size and item_name:
                 row_pack_size = pack_size_from_description(item_name)
 
-            # Use per-item extracted CGST/SGST when available, otherwise compute from inferred rates
-            item_cgst_r = row_cgst_rate if row_cgst_rate is not None else cgst_r
-            item_sgst_r = row_sgst_rate if row_sgst_rate is not None else sgst_r
-            item_igst_r = row_igst_rate if row_igst_rate is not None else igst_r
+            # PRD Addendum 5: Per-line isolated GST resolution.
+            # Strictly isolate line rates: row N must NEVER leak or carry forward to row N+1.
+            is_interstate = bool(row_igst_rate is not None or (supplier.state and buyer.state and supplier.state != buyer.state))
+            item_cgst_r = Decimal("0.00")
+            item_sgst_r = Decimal("0.00")
+            item_igst_r = Decimal("0.00")
 
-            # Date-dependent GST rate resolution (AD5)
-            row_tax_cand = {
-                "amount": taxable,
-                "is_single_tax_col": not ('cgst_rate' in cols and 'sgst_rate' in cols),
-                "cgst_rate": row_cgst_rate,
-                "cgst_amt": row_cgst_amt,
-                "sgst_rate": row_sgst_rate,
-                "sgst_amt": row_sgst_amt,
-                "igst_rate": row_igst_rate,
-                "igst_amt": row_igst_amt,
-            }
-            res_rate, res_how, _ = resolve_gst_rate(row_tax_cand, allowed=allowed_rates(inv_date))
-            if res_rate is not None and res_rate > Decimal("0.00"):
-                if row_igst_rate is not None or (supplier.state and buyer.state and supplier.state != buyer.state):
-                    item_igst_r = res_rate
+            is_explicit_zero = (
+                (row_gst_rate is not None and row_gst_rate == Decimal("0.00")) or
+                (row_cgst_rate is not None and row_cgst_rate == Decimal("0.00") and (row_sgst_rate is None or row_sgst_rate == Decimal("0.00"))) or
+                (row_igst_rate is not None and row_igst_rate == Decimal("0.00"))
+            )
+
+            if is_explicit_zero:
+                # 0% tax-free / exempt items MUST stay 0%
+                item_cgst_r = Decimal("0.00")
+                item_sgst_r = Decimal("0.00")
+                item_igst_r = Decimal("0.00")
+            elif row_gst_rate is not None and row_gst_rate > Decimal("0.00"):
+                # Priority 1: Line printed combined GST%
+                if is_interstate:
+                    item_igst_r = row_gst_rate
+                else:
+                    item_cgst_r = (row_gst_rate / Decimal("2.00")).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+                    item_sgst_r = row_gst_rate - item_cgst_r
+            elif row_cgst_rate is not None or row_sgst_rate is not None or row_igst_rate is not None:
+                # Priority 2: Line printed component rates
+                if is_interstate:
+                    item_igst_r = row_igst_rate if row_igst_rate is not None else ((row_cgst_rate or Decimal("0.00")) + (row_sgst_rate or Decimal("0.00")))
+                else:
+                    c = row_cgst_rate if row_cgst_rate is not None else row_sgst_rate
+                    s = row_sgst_rate if row_sgst_rate is not None else row_cgst_rate
+                    item_cgst_r = c or Decimal("0.00")
+                    item_sgst_r = s or Decimal("0.00")
+            else:
+                # Priority 3: Resolve from line amounts if printed
+                row_tax_cand = {
+                    "amount": taxable,
+                    "is_single_tax_col": not ('cgst_rate' in cols and 'sgst_rate' in cols),
+                    "cgst_rate": row_cgst_rate,
+                    "cgst_amt": row_cgst_amt,
+                    "sgst_rate": row_sgst_rate,
+                    "sgst_amt": row_sgst_amt,
+                    "igst_rate": row_igst_rate,
+                    "igst_amt": row_igst_amt,
+                }
+                res_rate, res_how, _ = resolve_gst_rate(row_tax_cand, allowed=allowed_rates(inv_date))
+                if res_rate is not None and res_rate > Decimal("0.00"):
+                    if is_interstate:
+                        item_igst_r = res_rate
+                    else:
+                        item_cgst_r = (res_rate / Decimal("2.00")).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+                        item_sgst_r = res_rate - item_cgst_r
+                elif single_invoice_slab is not None:
+                    # Priority 4: ONLY if the invoice has a single unambiguous slab across all totals
+                    if is_interstate:
+                        item_igst_r = single_invoice_slab
+                    else:
+                        item_cgst_r = (single_invoice_slab / Decimal("2.00")).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+                        item_sgst_r = single_invoice_slab - item_cgst_r
+                else:
+                    # Default: 0% (Do not guess 18% or spread previous line rate!)
                     item_cgst_r = Decimal("0.00")
                     item_sgst_r = Decimal("0.00")
-                else:
-                    item_cgst_r = (res_rate / Decimal("2.00")).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
-                    item_sgst_r = res_rate - item_cgst_r
                     item_igst_r = Decimal("0.00")
 
             # Intra-state supply: CGST rate must equal SGST rate under GST law
-            if item_cgst_r != item_sgst_r:
-                if item_sgst_r > Decimal("0.00") and (item_cgst_r == Decimal("0.00") or (row_cgst_amt and row_sgst_amt and abs(row_cgst_amt - row_sgst_amt) <= Decimal("0.05"))):
+            if not is_interstate and item_cgst_r != item_sgst_r:
+                if item_sgst_r > Decimal("0.00") and item_cgst_r == Decimal("0.00"):
                     item_cgst_r = item_sgst_r
-                elif item_cgst_r > Decimal("0.00") and (item_sgst_r == Decimal("0.00") or (row_cgst_amt and row_sgst_amt and abs(row_cgst_amt - row_sgst_amt) <= Decimal("0.05"))):
+                elif item_cgst_r > Decimal("0.00") and item_sgst_r == Decimal("0.00"):
                     item_sgst_r = item_cgst_r
 
             if row_cgst_amt is not None and row_cgst_amt > Decimal("0.00"):
@@ -2727,6 +2772,62 @@ class InvoiceExtractor:
                 totals['tax_mode_evidence'] = det_why
 
         totals['table_columns'] = table_columns_meta
+
+        # PRD Addendum 5: Slab summary verification box
+        slabs_breakdown = {}
+        total_items_taxable = Decimal("0.00")
+        total_items_tax = Decimal("0.00")
+        for it in items:
+            slab_pct = (it.igst_rate if it.igst_rate > Decimal("0.00") else (it.cgst_rate + it.sgst_rate)).quantize(Decimal("0.01"))
+            slab_key = f"{slab_pct:.1f}%"
+            if slab_key not in slabs_breakdown:
+                slabs_breakdown[slab_key] = {
+                    "rate_pct": float(slab_pct),
+                    "rate_label": slab_key,
+                    "taxable_amount": Decimal("0.00"),
+                    "cgst_amount": Decimal("0.00"),
+                    "sgst_amount": Decimal("0.00"),
+                    "igst_amount": Decimal("0.00"),
+                    "total_tax": Decimal("0.00"),
+                    "item_count": 0,
+                    "items": []
+                }
+            sb = slabs_breakdown[slab_key]
+            sb["taxable_amount"] += it.taxable_amount
+            sb["cgst_amount"] += it.cgst_amount
+            sb["sgst_amount"] += it.sgst_amount
+            sb["igst_amount"] += it.igst_amount
+            sb["total_tax"] += (it.cgst_amount + it.sgst_amount + it.igst_amount)
+            sb["item_count"] += 1
+            if len(sb["items"]) < 5:
+                sb["items"].append(it.item_name)
+            total_items_taxable += it.taxable_amount
+            total_items_tax += (it.cgst_amount + it.sgst_amount + it.igst_amount)
+
+        # Check tolerance (± ₹1) against printed totals
+        taxable_diff = abs(total_items_taxable - totals['taxable_total'])
+        printed_tax = (totals.get('cgst_total') or Decimal("0.00")) + (totals.get('sgst_total') or Decimal("0.00")) + (totals.get('igst_total') or Decimal("0.00"))
+        tax_diff = abs(total_items_tax - printed_tax)
+        is_slab_verified = (taxable_diff <= Decimal("1.00")) and (tax_diff <= Decimal("1.00"))
+
+        totals['slab_summary'] = {
+            "slabs": [
+                {
+                    **v,
+                    "taxable_amount": float(v["taxable_amount"]),
+                    "cgst_amount": float(v["cgst_amount"]),
+                    "sgst_amount": float(v["sgst_amount"]),
+                    "igst_amount": float(v["igst_amount"]),
+                    "total_tax": float(v["total_tax"]),
+                }
+                for v in sorted(slabs_breakdown.values(), key=lambda x: x["rate_pct"])
+            ],
+            "total_items_taxable": float(total_items_taxable),
+            "total_items_tax": float(total_items_tax),
+            "is_verified": is_slab_verified,
+            "taxable_diff": float(taxable_diff),
+            "tax_diff": float(tax_diff)
+        }
 
         # 5. Item Count Reconciliation
         if detected_item_rows_count != len(items) and detected_item_rows_count > 0:

@@ -120,6 +120,9 @@ class InvoiceItem(BaseModel):
     is_tax_inclusive: bool = False
     discount_pattern: Optional[str] = None
     is_free_item: bool = False
+    parent_group: Optional[str] = "Primary"
+    taxability: Optional[str] = "Taxable"
+    type_of_supply: Optional[str] = "Goods"
 
     def __init__(self, **data: Any):
         if "item_size" in data and data["item_size"] and not data.get("pack_size"):

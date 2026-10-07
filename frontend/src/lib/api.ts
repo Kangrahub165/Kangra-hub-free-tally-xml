@@ -2235,12 +2235,34 @@ export async function matchStockItemsBatch(
   });
 }
 
+export interface StockGroupItem {
+  name: string;
+  item_count: number;
+}
+
+export interface StockUnitItem {
+  name: string;
+  item_count: number;
+}
+
+export async function getStockItemGroups(): Promise<StockGroupItem[]> {
+  return apiFetch<StockGroupItem[]>('/stock-items/groups');
+}
+
+export async function getStockItemUnits(): Promise<StockUnitItem[]> {
+  return apiFetch<StockUnitItem[]>('/stock-items/units');
+}
+
 export async function createNewStockItem(data: {
   name: string;
   hsn?: string;
   uom?: string;
   parent_group?: string;
   gst_rate?: number;
+  taxability?: string;
+  type_of_supply?: string;
+  additional_units?: string;
+  conversion?: number;
 }): Promise<{ success: boolean; item: ImportedStockItem; xml_snippet: string }> {
   return apiFetch('/stock-items/create', {
     method: 'POST',

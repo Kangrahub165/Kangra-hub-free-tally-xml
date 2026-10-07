@@ -169,20 +169,45 @@ def parse_xml_stock_items(content: str) -> Tuple[List[ImportedStockItem], int, L
                 elif c_tag == "GSTTYPEOFSUPPLY" and child.text:
                     gst_type = child.text.strip()
                 elif "HSNDETAILS" in c_tag:
-                    for h_child in child:
-                        for sub in h_child:
-                            sub_tag = sub.tag.upper().split('}')[-1]
-                            if sub_tag == "HSNCODE" and sub.text:
-                                hsn_code = sub.text.strip()
-                elif "GSTDETAILS" in c_tag:
-                    for g_child in child:
-                        for sub in g_child:
-                            sub_tag = sub.tag.upper().split('}')[-1]
-                            if "RATE" in sub_tag and sub.text:
-                                try:
-                                    gst_rate = Decimal(sub.text.strip()).quantize(Decimal("0.01"))
-                                except Exception:
-                                    pass
+                    for sub in child.iter():
+                        sub_tag = sub.tag.upper().split('}')[-1]
+                        if sub_tag == "HSNCODE" and sub.text and sub.text.strip():
+                            hsn_code = sub.text.strip()
+                elif "GSTDETAILS" in c_tag or "GSTRATE" in c_tag:
+                    cgst_val = None
+                    sgst_val = None
+                    igst_val = None
+                    for rnode in child.iter():
+                        rtag = rnode.tag.upper().split('}')[-1]
+                        if rtag == "RATEDETAILS.LIST":
+                            head = None
+                            rval = None
+                            for f in rnode:
+                                ftag = f.tag.upper().split('}')[-1]
+                                if ftag == "GSTRATEDUTYHEAD" and f.text:
+                                    head = f.text.strip().upper()
+                                elif ftag == "GSTRATE" and f.text:
+                                    try:
+                                        rval = Decimal(f.text.strip()).quantize(Decimal("0.01"))
+                                    except Exception:
+                                        pass
+                            if head == "IGST" and rval is not None:
+                                igst_val = rval
+                            elif head == "CGST" and rval is not None:
+                                cgst_val = rval
+                            elif "SGST" in (head or "") and rval is not None:
+                                sgst_val = rval
+                        elif "RATE" in rtag and rnode.text and gst_rate is None:
+                            try:
+                                fallback_r = Decimal(rnode.text.strip()).quantize(Decimal("0.01"))
+                                if fallback_r > 0:
+                                    gst_rate = fallback_r
+                            except Exception:
+                                pass
+                    if igst_val is not None and igst_val > Decimal("0.00"):
+                        gst_rate = igst_val
+                    elif cgst_val is not None or sgst_val is not None:
+                        gst_rate = (cgst_val or Decimal("0.00")) + (sgst_val or Decimal("0.00"))
 
             if name and name.strip():
                 clean_name = " ".join(name.strip().split())
@@ -570,21 +595,67 @@ class GlobalStockItemStore:
                 suggestions=top_suggestions
             )
 
+    def get_stock_groups(self, user_id: str) -> List[Dict[str, Any]]:
+        """
+        PRD Addendum 5: Returns distinct Stock Groups (parents) from imported Tally items,
+        sorted with "Primary" first, then alphabetically, with item counts.
+        """
+        all_items = self.get_items(user_id, limit=None)
+        counts: Dict[str, int] = {}
+        for it in all_items:
+            grp = (it.parent or "Primary").strip()
+            if grp:
+                counts[grp] = counts.get(grp, 0) + 1
+
+        if "Primary" not in counts:
+            counts["Primary"] = 0
+
+        result = [{"name": "Primary", "item_count": counts.get("Primary", 0)}]
+        for grp_name in sorted(counts.keys(), key=lambda s: s.lower()):
+            if grp_name != "Primary":
+                result.append({"name": grp_name, "item_count": counts[grp_name]})
+
+        return result
+
+    def get_stock_units(self, user_id: str) -> List[Dict[str, Any]]:
+        """
+        Returns distinct base units from imported Tally items with counts.
+        """
+        all_items = self.get_items(user_id, limit=None)
+        counts: Dict[str, int] = {}
+        for it in all_items:
+            u = (it.base_units or "NOS").strip()
+            if u:
+                counts[u] = counts.get(u, 0) + 1
+
+        standard = ["NOS", "PCS", "CASE", "BOX", "BTL", "KG", "LTR", "PKT", "DOZ", "BAG", "CAN", "SET", "GM"]
+        for s in standard:
+            if s not in counts:
+                counts[s] = 0
+
+        sorted_units = sorted(counts.items(), key=lambda x: (-x[1], x[0]))
+        return [{"name": name, "item_count": count} for name, count in sorted_units]
+
     def generate_new_stock_item_xml(
         self,
         name: str,
         hsn: Optional[str] = None,
         uom: str = "NOS",
         parent_group: Optional[str] = "Primary",
-        gst_rate: Optional[Decimal] = None
+        gst_rate: Optional[Decimal] = None,
+        taxability: str = "Taxable",
+        type_of_supply: str = "Goods",
+        additional_units: Optional[str] = None,
+        conversion: Optional[Decimal] = None
     ) -> str:
         """
         Generates master XML snippet strictly conforming to stock items list sample.xml.
         """
-        clean_name = " ".join(name.strip().split())
-        clean_uom = (uom or "NOS").strip()
-        clean_parent = (parent_group or "Primary").strip()
-        hsn_str = (hsn or "").strip()
+        import xml.sax.saxutils as saxutils
+        clean_name = saxutils.escape(" ".join(name.strip().split()))
+        clean_uom = saxutils.escape((uom or "NOS").strip())
+        clean_parent = saxutils.escape((parent_group or "Primary").strip())
+        hsn_str = saxutils.escape((hsn or "").strip())
 
         lines = [
             '<TALLYMESSAGE xmlns:UDF="TallyUDF">',
@@ -592,27 +663,73 @@ class GlobalStockItemStore:
             f'  <NAME>{clean_name}</NAME>',
             f'  <PARENT>{clean_parent}</PARENT>',
             f'  <BASEUNITS>{clean_uom}</BASEUNITS>',
+        ]
+
+        if additional_units and conversion and conversion > Decimal("1"):
+            clean_alt = saxutils.escape(additional_units.strip())
+            lines.extend([
+                f'  <ADDITIONALUNITS>{clean_alt}</ADDITIONALUNITS>',
+                '  <DENOMINATOR>1</DENOMINATOR>',
+                f'  <CONVERSION>{int(conversion)}</CONVERSION>'
+            ])
+
+        lines.extend([
             '  <GSTAPPLICABLE>&#4; Applicable</GSTAPPLICABLE>',
-            '  <GSTTYPEOFSUPPLY>Goods</GSTTYPEOFSUPPLY>',
+            f'  <GSTTYPEOFSUPPLY>{saxutils.escape(type_of_supply or "Goods")}</GSTTYPEOFSUPPLY>',
             '  <ISCOSTCENTRESON>No</ISCOSTCENTRESON>',
             '  <ISBATCHWISEON>No</ISBATCHWISEON>',
-        ]
+            '  <ISPERISHABLEON>No</ISPERISHABLEON>',
+            '  <OPENINGBALANCE>0</OPENINGBALANCE>'
+        ])
+
+        if gst_rate is not None and gst_rate > Decimal("0.00") and (taxability or "Taxable").lower() == "taxable":
+            cgst = (gst_rate / Decimal("2")).quantize(Decimal("0.01"))
+            sgst = cgst
+            igst = gst_rate
+            lines.extend([
+                '  <GSTDETAILS.LIST>',
+                '   <APPLICABLEFROM>20210401</APPLICABLEFROM>',
+                '   <CALCULATIONTYPE>On Value</CALCULATIONTYPE>',
+                '   <TAXABILITY>Taxable</TAXABILITY>',
+                '   <SRCOFGSTDETAILS>Specify Details Here</SRCOFGSTDETAILS>',
+                '   <STATEWISEDETAILS.LIST>',
+                '    <STATENAME>&#4; Any</STATENAME>',
+                '    <RATEDETAILS.LIST>',
+                '     <GSTRATEDUTYHEAD>CGST</GSTRATEDUTYHEAD>',
+                '     <GSTRATEVALUATIONTYPE>Based on Value</GSTRATEVALUATIONTYPE>',
+                f'     <GSTRATE> {cgst}</GSTRATE>',
+                '    </RATEDETAILS.LIST>',
+                '    <RATEDETAILS.LIST>',
+                '     <GSTRATEDUTYHEAD>SGST/UTGST</GSTRATEDUTYHEAD>',
+                '     <GSTRATEVALUATIONTYPE>Based on Value</GSTRATEVALUATIONTYPE>',
+                f'     <GSTRATE> {sgst}</GSTRATE>',
+                '    </RATEDETAILS.LIST>',
+                '    <RATEDETAILS.LIST>',
+                '     <GSTRATEDUTYHEAD>IGST</GSTRATEDUTYHEAD>',
+                '     <GSTRATEVALUATIONTYPE>Based on Value</GSTRATEVALUATIONTYPE>',
+                f'     <GSTRATE> {igst}</GSTRATE>',
+                '    </RATEDETAILS.LIST>',
+                '   </STATEWISEDETAILS.LIST>',
+                '  </GSTDETAILS.LIST>'
+            ])
+        elif taxability and taxability.lower() in ("exempt", "nil rated"):
+            t_cap = "Exempt" if taxability.lower() == "exempt" else "Nil Rated"
+            lines.extend([
+                '  <GSTDETAILS.LIST>',
+                '   <APPLICABLEFROM>20210401</APPLICABLEFROM>',
+                '   <CALCULATIONTYPE>On Value</CALCULATIONTYPE>',
+                f'   <TAXABILITY>{t_cap}</TAXABILITY>',
+                '   <SRCOFGSTDETAILS>Specify Details Here</SRCOFGSTDETAILS>',
+                '  </GSTDETAILS.LIST>'
+            ])
 
         if hsn_str:
             lines.extend([
                 '  <HSNDETAILS.LIST>',
-                '   <APPLICABLEFROM>20250401</APPLICABLEFROM>',
+                '   <APPLICABLEFROM>20210401</APPLICABLEFROM>',
                 f'   <HSNCODE>{hsn_str}</HSNCODE>',
+                '   <SRCOFHSNDETAILS>Specify Details Here</SRCOFHSNDETAILS>',
                 '  </HSNDETAILS.LIST>'
-            ])
-
-        if gst_rate is not None and gst_rate > Decimal("0.00"):
-            lines.extend([
-                '  <GSTDETAILS.LIST>',
-                '   <APPLICABLEFROM>20250401</APPLICABLEFROM>',
-                '   <TAXABILITY>Taxable</TAXABILITY>',
-                f'   <GSTRATE>{gst_rate:.2f}</GSTRATE>',
-                '  </GSTDETAILS.LIST>'
             ])
 
         lines.extend([

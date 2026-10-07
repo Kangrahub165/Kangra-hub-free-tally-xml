@@ -30,6 +30,10 @@ class CreateStockItemRequest(BaseModel):
     uom: Optional[str] = "NOS"
     parent_group: Optional[str] = "Primary"
     gst_rate: Optional[float] = None
+    taxability: Optional[str] = "Taxable"
+    type_of_supply: Optional[str] = "Goods"
+    additional_units: Optional[str] = None
+    conversion: Optional[float] = None
 
 class MatchItemsBatchRequest(BaseModel):
     items: List[dict]  # [{"name": "...", "hsn": "..."}]
@@ -89,6 +93,18 @@ async def match_stock_items_batch(
         results.append(match)
     return results
 
+@router.get("/groups")
+async def list_stock_groups_endpoint(request: Request):
+    """PRD Addendum 5: Lists distinct Stock Groups from imported Tally items + 'Primary'."""
+    user_id = resolve_user_id(request)
+    return global_stock_item_store.get_stock_groups(user_id)
+
+@router.get("/units")
+async def list_stock_units_endpoint(request: Request):
+    """Lists distinct units from imported Tally items."""
+    user_id = resolve_user_id(request)
+    return global_stock_item_store.get_stock_units(user_id)
+
 @router.post("/create")
 async def create_new_stock_item_xml_endpoint(
     request: Request,
@@ -96,13 +112,14 @@ async def create_new_stock_item_xml_endpoint(
 ):
     """
     Creates a new stock item and returns its Tally XML master snippet
-    conforming to stock items list sample.xml.
+    conforming strictly to stock items list sample.xml.
     """
     if not body.name or not body.name.strip():
         raise HTTPException(status_code=400, detail="Stock item name cannot be empty.")
 
     user_id = resolve_user_id(request)
     gst_dec = Decimal(str(body.gst_rate)) if body.gst_rate is not None else None
+    conv_dec = Decimal(str(body.conversion)) if body.conversion is not None else None
 
     # Save to user's store
     item = ImportedStockItem(
@@ -110,8 +127,10 @@ async def create_new_stock_item_xml_endpoint(
         normalized_name=" ".join(body.name.strip().upper().split()),
         parent=body.parent_group or "Primary",
         base_units=body.uom or "NOS",
+        additional_units=body.additional_units,
         hsn_code=body.hsn,
         gst_rate=gst_dec,
+        gst_type_of_supply=body.type_of_supply or "Goods",
         source_format="MANUAL"
     )
     global_stock_item_store.add_items(user_id, [item])
@@ -121,7 +140,11 @@ async def create_new_stock_item_xml_endpoint(
         hsn=body.hsn,
         uom=body.uom or "NOS",
         parent_group=body.parent_group or "Primary",
-        gst_rate=gst_dec
+        gst_rate=gst_dec,
+        taxability=body.taxability or "Taxable",
+        type_of_supply=body.type_of_supply or "Goods",
+        additional_units=body.additional_units,
+        conversion=conv_dec
     )
 
     return {

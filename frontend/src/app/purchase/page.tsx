@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/components/auth/AuthProvider';
@@ -73,6 +73,7 @@ import {
 import { CompanyProfileDropdown } from '@/components/CompanyProfileDropdown';
 import { StockItemSearchModal } from '@/components/StockItemSearchModal';
 import { ScanBillModal } from '@/components/ScanBillModal';
+import { CreateStockItemMasterModal } from '@/components/CreateStockItemMasterModal';
 import { downloadStockItemsMasterXmlFile, CompanyProfile } from '@/lib/stockItemsMasterXml';
 import { convertQuantityAndRate } from '@/lib/unitConverter';
 import { mergeSizeIntoItemName } from '@/lib/utils';
@@ -1345,32 +1346,148 @@ export default function PurchasePage() {
     }
   };
 
-  // Create new stock item action
-  const handleCreateNewStockItemSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newItemData.name.trim()) return;
+  // PRD Addendum 5: All new items needing master creation
+  const allNewItems = useMemo(() => {
+    if (!currentInvoice) return [];
+    return currentInvoice.items
+      .map((it, idx) => ({ ...it, originalIndex: idx }))
+      .filter((it) => it.requires_item_creation || it.mapping_status === 'NEW_ITEM' || !it.matched_stock_item);
+  }, [currentInvoice]);
+
+  const currentNewItemPos = useMemo(() => {
+    if (targetItemIdxForMapping === null) return 0;
+    const pos = allNewItems.findIndex((it) => it.originalIndex === targetItemIdxForMapping);
+    return pos >= 0 ? pos : 0;
+  }, [allNewItems, targetItemIdxForMapping]);
+
+  // PRD Addendum 5: Live Slab Summary Verification Box
+  const slabVerification = useMemo(() => {
+    if (!currentInvoice || !currentInvoice.items.length) return null;
+    const slabs: Record<string, { rate: number; label: string; taxable: number; tax: number; count: number }> = {};
+    let totalTaxable = 0;
+    let totalTax = 0;
+
+    for (const it of currentInvoice.items) {
+      const rate = Number(it.igst_rate && it.igst_rate > 0 ? it.igst_rate : (Number(it.cgst_rate || 0) + Number(it.sgst_rate || 0)));
+      const key = `${rate.toFixed(1)}%`;
+      if (!slabs[key]) {
+        slabs[key] = { rate, label: key, taxable: 0, tax: 0, count: 0 };
+      }
+      const taxable = Number(it.taxable_amount || 0);
+      const tax = Number(it.cgst_amount || 0) + Number(it.sgst_amount || 0) + Number(it.igst_amount || 0);
+      slabs[key].taxable += taxable;
+      slabs[key].tax += tax;
+      slabs[key].count += 1;
+      totalTaxable += taxable;
+      totalTax += tax;
+    }
+
+    const printedTaxable = Number(currentInvoice.taxable_total || 0);
+    const printedTax = Number(currentInvoice.cgst_total || 0) + Number(currentInvoice.sgst_total || 0) + Number(currentInvoice.igst_total || 0);
+    const taxableDiff = Math.abs(totalTaxable - printedTaxable);
+    const taxDiff = Math.abs(totalTax - printedTax);
+    const isBalanced = (printedTaxable === 0 || taxableDiff <= 1.05) && (printedTax === 0 || taxDiff <= 1.05);
+
+    return {
+      slabs: Object.values(slabs).sort((a, b) => a.rate - b.rate),
+      totalTaxable,
+      totalTax,
+      printedTaxable,
+      printedTax,
+      taxableDiff,
+      taxDiff,
+      isBalanced,
+    };
+  }, [currentInvoice]);
+
+  // PRD Addendum 5: Save Stock Item Master with group, unit, alternate unit, taxability, and GST rate
+  const handleSaveStockItemMaster = async (
+    savedData: {
+      name: string;
+      parent_group: string;
+      uom: string;
+      hsn?: string;
+      gst_rate: number;
+      taxability: string;
+      type_of_supply: string;
+      additional_units?: string;
+      conversion?: number;
+    },
+    saveAndNext: boolean = false,
+    applyToAllNew: boolean = false
+  ) => {
     try {
       const res = await createNewStockItem({
-        name: newItemData.name.trim(),
-        hsn: newItemData.hsn.trim(),
-        uom: newItemData.uom.trim(),
-        parent_group: newItemData.group.trim(),
-        gst_rate: Number(newItemData.gst_rate) || 18,
+        name: savedData.name,
+        hsn: savedData.hsn,
+        uom: savedData.uom,
+        parent_group: savedData.parent_group,
+        gst_rate: savedData.gst_rate,
+        taxability: savedData.taxability,
+        type_of_supply: savedData.type_of_supply,
+        additional_units: savedData.additional_units,
+        conversion: savedData.conversion,
       });
 
       if (targetItemIdxForMapping !== null && currentInvoice) {
-        handleLineItemChange(targetItemIdxForMapping, 'matched_stock_item', res.item.name);
-        handleLineItemChange(targetItemIdxForMapping, 'requires_item_creation', false);
-        handleLineItemChange(targetItemIdxForMapping, 'mapping_status', 'AUTO_MAPPED');
-        handleLineItemChange(targetItemIdxForMapping, 'mapping_confidence', 'HIGH');
+        updateCurrentInvoice((inv) => {
+          const updatedItems = inv.items.map((it, idx) => {
+            if (idx === targetItemIdxForMapping) {
+              return {
+                ...it,
+                matched_stock_item: res.item.name,
+                item_name: res.item.name,
+                uom: res.item.base_units || it.uom,
+                hsn_sac: res.item.hsn_code || it.hsn_sac,
+                parent_group: savedData.parent_group,
+                taxability: savedData.taxability,
+                type_of_supply: savedData.type_of_supply,
+                gst_rate: savedData.gst_rate,
+                alternate_uom: savedData.additional_units || it.alternate_uom,
+                pack_multiplier: savedData.conversion ? savedData.conversion : it.pack_multiplier,
+                requires_item_creation: true,
+                mapping_status: 'VERIFIED' as const,
+                mapping_confidence: 'HIGH' as const,
+              };
+            }
+            if (applyToAllNew && (it.requires_item_creation || it.mapping_status === 'NEW_ITEM' || !it.matched_stock_item)) {
+              return {
+                ...it,
+                parent_group: savedData.parent_group,
+                taxability: savedData.taxability,
+                type_of_supply: savedData.type_of_supply,
+              };
+            }
+            return it;
+          });
+          return { ...inv, items: updatedItems };
+        });
       }
 
-      showAlert('Stock Item Created', `Stock item "${res.item.name}" created and indexed in Tally masters!`, 'success');
+      showAlert('Stock Item Master Created', `Stock item "${res.item.name}" created under "${savedData.parent_group}"!`, 'success');
       loadMasters();
+
+      if (saveAndNext) {
+        const nextItem = allNewItems.find((it) => it.originalIndex > (targetItemIdxForMapping ?? -1));
+        if (nextItem) {
+          setTargetItemIdxForMapping(nextItem.originalIndex);
+          return;
+        }
+      }
       setIsNewItemModalOpen(false);
-      setNewItemData({ name: '', hsn: '', uom: 'NOS', group: 'Primary', gst_rate: 18.0 });
     } catch (err: any) {
       showAlert('Creation Failed', `Failed to create stock item: ${err.message}`, 'error');
+    }
+  };
+
+  const handleUseExistingStockItem = (existingName: string) => {
+    if (targetItemIdxForMapping !== null && currentInvoice) {
+      handleLineItemChange(targetItemIdxForMapping, 'matched_stock_item', existingName);
+      handleLineItemChange(targetItemIdxForMapping, 'requires_item_creation', false);
+      handleLineItemChange(targetItemIdxForMapping, 'mapping_status', 'VERIFIED');
+      handleLineItemChange(targetItemIdxForMapping, 'mapping_confidence', 'HIGH');
+      showAlert('Item Mapped', `Mapped item to existing Tally stock item "${existingName}"!`, 'success');
+      setIsNewItemModalOpen(false);
     }
   };
 
@@ -2612,6 +2729,107 @@ export default function PurchasePage() {
               </CardContent>
             </Card>
 
+            {/* PRD ADDENDUM 5: REVIEW NEW ITEMS BANNER */}
+            {allNewItems.length > 0 && (
+              <div className="p-4 bg-gradient-to-r from-amber-500/10 via-orange-500/5 to-amber-50 border border-amber-200/90 rounded-2xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-xs">
+                <div className="flex items-center gap-3">
+                  <div className="w-9 h-9 rounded-xl bg-amber-500/20 border border-amber-400/40 flex items-center justify-center text-amber-800 shrink-0 shadow-2xs">
+                    <Sparkles className="w-4 h-4 text-amber-600" />
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <p className="text-xs sm:text-sm font-extrabold text-amber-950">
+                        {allNewItems.length} new {allNewItems.length === 1 ? 'stock item' : 'stock items'} will be created automatically in Tally
+                      </p>
+                      <Badge variant="warning" size="sm" className="font-bold text-[10px] bg-amber-100 text-amber-800 border-amber-300">
+                        One-File Import
+                      </Badge>
+                    </div>
+                    <p className="text-[11px] text-amber-800/90 mt-0.5">
+                      New items are built directly into your download file. You can review or customize Stock Groups (Parent) and GST rates before export.
+                    </p>
+                  </div>
+                </div>
+                <Button
+                  variant="primary"
+                  size="sm"
+                  onClick={() => {
+                    if (allNewItems.length > 0) {
+                      setTargetItemIdxForMapping(allNewItems[0].originalIndex);
+                      setIsNewItemModalOpen(true);
+                    }
+                  }}
+                  className="bg-amber-600 hover:bg-amber-700 text-white font-extrabold text-xs shrink-0 shadow-xs flex items-center gap-1.5"
+                >
+                  <Package className="w-3.5 h-3.5" />
+                  <span>Review New Items ({allNewItems.length})</span>
+                </Button>
+              </div>
+            )}
+
+            {/* PRD ADDENDUM 5: SLAB SUMMARY VERIFICATION BOX */}
+            {slabVerification && slabVerification.slabs.length > 0 && (
+              <div className="p-4 bg-white rounded-2xl border border-slate-200/90 shadow-xs space-y-3">
+                <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 border-b border-slate-100 pb-2.5">
+                  <div className="flex items-center gap-2">
+                    <div className="w-7 h-7 rounded-lg bg-emerald-50 text-emerald-700 flex items-center justify-center border border-emerald-200/60 font-bold text-xs">
+                      %
+                    </div>
+                    <div>
+                      <h4 className="text-xs sm:text-sm font-extrabold text-slate-900 flex items-center gap-2">
+                        <span>GST Slab Breakdown & Verification</span>
+                        {slabVerification.isBalanced ? (
+                          <span className="inline-flex items-center gap-1 text-[10px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-full">
+                            <CheckCircle2 className="w-3 h-3 text-emerald-600" />
+                            Slabs Balanced (&plusmn;&#8377;1.00)
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1 text-[10px] font-bold text-amber-800 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded-full">
+                            <AlertTriangle className="w-3 h-3 text-amber-600" />
+                            Diff: &#8377;{slabVerification.taxableDiff.toFixed(2)} taxable / &#8377;{slabVerification.taxDiff.toFixed(2)} tax
+                          </span>
+                        )}
+                      </h4>
+                      <p className="text-[10px] sm:text-[11px] text-slate-500">
+                        Line rates are isolated per item. Taxable value & tax verified against bill summary.
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="text-right text-[11px] font-mono text-slate-600">
+                    <span>Total Taxable: <strong>&#8377;{slabVerification.totalTaxable.toFixed(2)}</strong></span>
+                    <span className="mx-1.5 text-slate-300">|</span>
+                    <span>Total Tax: <strong>&#8377;{slabVerification.totalTax.toFixed(2)}</strong></span>
+                  </div>
+                </div>
+
+                {/* Slabs Grid */}
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-2">
+                  {slabVerification.slabs.map((slab) => (
+                    <div
+                      key={slab.label}
+                      className="p-2.5 rounded-xl border border-slate-100 bg-slate-50/70 hover:bg-slate-50 transition-colors"
+                    >
+                      <div className="flex items-center justify-between text-xs font-bold text-slate-800">
+                        <span className="text-emerald-700">{slab.label}</span>
+                        <span className="text-[10px] text-slate-500 font-normal">{slab.count} {slab.count === 1 ? 'item' : 'items'}</span>
+                      </div>
+                      <div className="mt-1.5 text-[11px] font-mono text-slate-600 space-y-0.5">
+                        <div className="flex justify-between">
+                          <span className="text-slate-400 text-[10px]">Taxable:</span>
+                          <span>&#8377;{slab.taxable.toFixed(2)}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-slate-400 text-[10px]">Tax:</span>
+                          <span className="font-semibold text-slate-700">&#8377;{slab.tax.toFixed(2)}</span>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
             {/* ATOMIC PURCHASE ITEMS TABLE WITH FILTER & SEARCH */}
             <Card className="border-slate-200/90 shadow-card bg-white rounded-2xl overflow-hidden">
               <CardHeader className="bg-gradient-to-r from-slate-50/90 via-slate-50/50 to-white border-b border-slate-100 p-4 sm:p-5">
@@ -3627,55 +3845,24 @@ export default function PurchasePage() {
               Purchase Tally XML Successfully Generated!
             </h2>
             <p className="text-xs sm:text-sm text-slate-600 mt-2 max-w-md mx-auto">
-              Your Purchase bills have been exported conforming strictly to PURCHASE SAMPLE.xml with double-entry arithmetic and master creation.
+              Your Purchase bills have been exported as a single, self-contained Tally XML file with complete stock items, groups, units, and vendor ledgers.
             </p>
 
-            <div className="mt-6 text-left bg-slate-50 rounded-xl p-4 border border-slate-200 text-xs space-y-2">
-              <h4 className="font-bold text-navy-900 flex items-center gap-1.5">
-                <FileCode className="w-4 h-4 text-emerald-600" />
-                How to Import in Tally Prime / ERP 9:
+            <div className="mt-6 text-left bg-emerald-50/70 rounded-xl p-4 border border-emerald-200 text-xs space-y-2">
+              <h4 className="font-extrabold text-emerald-950 flex items-center gap-1.5">
+                <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                One-File Import Instructions (Tally Prime / ERP 9):
               </h4>
-              <ol className="list-decimal list-inside space-y-1 text-slate-600 pl-1">
+              <p className="text-[11px] text-emerald-800">
+                Your downloaded XML file contains both your vouchers and any missing stock items, units, and vendor ledgers.
+                You only need to import this single file!
+              </p>
+              <ol className="list-decimal list-inside space-y-1 text-slate-700 pl-1 font-medium">
                 <li>Open your company in Tally Prime.</li>
-                <li>Press <kbd className="px-1.5 py-0.5 rounded bg-slate-200 font-mono text-[11px]">Alt + O</kbd> (Import Menu).</li>
-                <li>Select <strong>Transactions</strong> (and Masters if auto-creating items).</li>
+                <li>Press <kbd className="px-1.5 py-0.5 rounded bg-white border border-slate-200 font-mono text-[11px]">Alt + O</kbd> (Import Menu).</li>
+                <li>Select <strong>Transactions</strong> (or <strong>All Masters</strong>).</li>
                 <li>Select your downloaded XML file and press Enter.</li>
               </ol>
-            </div>
-
-            {/* OPTIONAL: DOWNLOAD STOCK ITEMS MASTER XML */}
-            <div className="mt-4 p-4 rounded-xl bg-purple-50/80 border border-purple-200 text-left text-xs flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-xs">
-              <div className="flex items-center gap-2.5">
-                <Package className="w-5 h-5 text-purple-600 flex-shrink-0" />
-                <div>
-                  <p className="font-extrabold text-purple-950">Need Stock Items Created in Tally First?</p>
-                  <p className="text-[11px] text-purple-700">Import Master XML before vouchers via Alt + O &rarr; Import &rarr; Masters.</p>
-                </div>
-              </div>
-              <div className="flex flex-wrap items-center gap-2">
-                {currentInvoice && currentInvoice.items.some((it) => it.requires_item_creation || it.mapping_status === 'NEW_ITEM' || !it.matched_stock_item) && (
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => handleDownloadStockItemsMasterXml(true)}
-                    disabled={isDownloadingItemsXml}
-                    className="bg-white hover:bg-amber-100 text-amber-950 border-amber-300 font-extrabold text-xs flex items-center gap-1.5 shadow-xs whitespace-nowrap"
-                  >
-                    <Download className="w-3.5 h-3.5 text-amber-700" />
-                    {isDownloadingItemsXml ? 'Generating...' : 'Download New Items XML'}
-                  </Button>
-                )}
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => handleDownloadStockItemsMasterXml(false)}
-                  disabled={isDownloadingItemsXml}
-                  className="bg-white hover:bg-purple-100 text-purple-900 border-purple-300 font-bold text-xs flex items-center gap-1.5 shadow-xs whitespace-nowrap"
-                >
-                  <Download className="w-3.5 h-3.5 text-purple-700" />
-                  {isDownloadingItemsXml ? 'Generating...' : 'Download All Stock Items XML'}
-                </Button>
-              </div>
             </div>
 
             <div className="mt-8 flex flex-col sm:flex-row items-center justify-center gap-3">
@@ -3802,81 +3989,24 @@ export default function PurchasePage() {
         </div>
       </Modal>
 
-      {/* MODAL: CREATE NEW STOCK ITEM */}
-      <Modal
+      {/* SMART CREATE STOCK ITEM MASTER MODAL (PRD Addendum 5) */}
+      <CreateStockItemMasterModal
         isOpen={isNewItemModalOpen}
         onClose={() => setIsNewItemModalOpen(false)}
-        title="Create New Stock Item in Tally"
-        size="md"
-      >
-        <form onSubmit={handleCreateNewStockItemSubmit} className="space-y-4 text-xs">
-          <p className="text-slate-600">
-            Generate a Tally stock master XML snippet conforming strictly to <code className="bg-slate-100 px-1 py-0.5 rounded font-mono">stock items list sample.xml</code>.
-          </p>
-
-          <div>
-            <label className="block font-semibold text-slate-700 mb-1">Item Name *</label>
-            <Input
-              value={newItemData.name}
-              onChange={(e) => setNewItemData({ ...newItemData, name: e.target.value })}
-              required
-              className="text-xs font-bold"
-            />
-          </div>
-
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block font-semibold text-slate-700 mb-1">HSN / SAC Code</label>
-              <Input
-                value={newItemData.hsn}
-                onChange={(e) => setNewItemData({ ...newItemData, hsn: e.target.value })}
-                placeholder="e.g. 22021010"
-                className="text-xs font-mono"
-              />
-            </div>
-            <div>
-              <label className="block font-semibold text-slate-700 mb-1">Base UOM</label>
-              <Input
-                value={newItemData.uom}
-                onChange={(e) => setNewItemData({ ...newItemData, uom: e.target.value.toUpperCase() })}
-                placeholder="e.g. case, NOS, PCS"
-                className="text-xs uppercase font-mono"
-              />
-            </div>
-          </div>
-
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block font-semibold text-slate-700 mb-1">Stock Group (Parent)</label>
-              <Input
-                value={newItemData.group}
-                onChange={(e) => setNewItemData({ ...newItemData, group: e.target.value })}
-                placeholder="Primary"
-                className="text-xs"
-              />
-            </div>
-            <div>
-              <label className="block font-semibold text-slate-700 mb-1">GST Rate %</label>
-              <Input
-                type="number"
-                step="0.1"
-                value={newItemData.gst_rate}
-                onChange={(e) => setNewItemData({ ...newItemData, gst_rate: parseFloat(e.target.value) || 0 })}
-                className="text-xs font-mono"
-              />
-            </div>
-          </div>
-
-          <div className="flex justify-end gap-2 pt-3 border-t border-slate-100">
-            <Button variant="outline" size="sm" type="button" onClick={() => setIsNewItemModalOpen(false)}>
-              Cancel
-            </Button>
-            <Button variant="primary" size="sm" type="submit" className="font-bold bg-emerald-600 hover:bg-emerald-700 text-white">
-              Save & Map to Purchase Item
-            </Button>
-          </div>
-        </form>
-      </Modal>
+        item={targetItemIdxForMapping !== null && currentInvoice ? currentInvoice.items[targetItemIdxForMapping] : null}
+        initialInvoiceValues={targetItemIdxForMapping !== null && currentInvoice ? {
+          item_name: currentInvoice.items[targetItemIdxForMapping].item_name,
+          hsn_sac: currentInvoice.items[targetItemIdxForMapping].hsn_sac,
+          uom: currentInvoice.items[targetItemIdxForMapping].uom,
+          gst_rate: currentInvoice.items[targetItemIdxForMapping].gst_rate,
+        } : null}
+        existingStockItems={stockItems}
+        allNewItems={allNewItems}
+        currentNewItemIndex={currentNewItemPos}
+        isInterstate={currentInvoice ? (currentInvoice.igst_total > 0 || Boolean(currentInvoice.supplier.state && currentInvoice.buyer.state && currentInvoice.supplier.state !== currentInvoice.buyer.state)) : false}
+        onSaveMaster={handleSaveStockItemMaster}
+        onUseExistingItem={handleUseExistingStockItem}
+      />
 
       {/* MODAL: CREATE NEW VENDOR LEDGER */}
       <Modal

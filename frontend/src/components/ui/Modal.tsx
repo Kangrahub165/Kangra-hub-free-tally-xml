@@ -8,7 +8,7 @@ import { cn } from '@/lib/utils';
 export interface ModalProps {
   isOpen: boolean;
   onClose: () => void;
-  title?: string;
+  title?: React.ReactNode;
   description?: string;
   children: React.ReactNode;
   maxWidth?: 'sm' | 'md' | 'lg' | 'xl' | '2xl' | '3xl' | '4xl' | '5xl';
@@ -88,9 +88,13 @@ export function Modal({
           <div className="flex items-start justify-between px-4 py-3.5 sm:px-6 sm:py-4.5 border-b border-slate-100 flex-shrink-0 bg-white">
             <div className="pr-4 sm:pr-6 min-w-0">
               {title && (
-                <h2 className="text-base sm:text-lg font-bold text-slate-900 tracking-tight truncate">
-                  {title}
-                </h2>
+                typeof title === 'string' ? (
+                  <h2 className="text-base sm:text-lg font-bold text-slate-900 tracking-tight truncate">
+                    {title}
+                  </h2>
+                ) : (
+                  <div>{title}</div>
+                )
               )}
               {description && (
                 <p className="text-xs text-slate-500 mt-0.5 leading-relaxed line-clamp-2 sm:line-clamp-none">
