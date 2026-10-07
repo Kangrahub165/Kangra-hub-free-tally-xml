@@ -17,7 +17,7 @@ export default function TermsPage() {
     {
       title: '2. Daily Allowance & Fair Usage Policy',
       content:
-        'Free accounts are granted a daily allowance of 50 PDF pages calculated on actual statement pages parsed. The daily quota resets each midnight at 00:00 Asia/Kolkata timezone. Automated script abuse, denial-of-service attempts, or efforts to bypass rate limits will result in automated account restriction.',
+        'Free accounts are granted a daily allowance of 5 free bills. The daily quota resets each midnight at 00:00 Asia/Kolkata timezone. Multi-page invoices count as 1 bill. Automated script abuse, denial-of-service attempts, or efforts to bypass rate limits will result in automated account restriction.',
     },
     {
       title: '3. Professional Accounting Verification',

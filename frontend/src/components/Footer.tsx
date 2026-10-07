@@ -29,7 +29,7 @@ export function Footer() {
               <div className="relative w-9 h-9 flex-shrink-0">
                 <Image
                   src="/logo.webp"
-                  alt="Kangra Hub Free Tally XML"
+                  alt="Kangra Hub — Sales & Purchase"
                   width={36}
                   height={36}
                   className="rounded-xl shadow-xs"
@@ -40,19 +40,19 @@ export function Footer() {
                   Kangra Hub
                 </span>
                 <span className="text-[10px] font-bold text-slate-400 tracking-wider uppercase">
-                  Free Tally XML Converter
+                  Sales & Purchase
                 </span>
               </div>
             </Link>
 
             <p className="text-xs text-slate-400 leading-relaxed max-w-sm">
-              Automated financial converter transforming bank statement PDFs into mathematically verified, balanced Tally XML files ready for instant import into TallyPrime and Tally.ERP 9.
+              Automated invoice OCR and extraction converting Sales and Purchase PDFs into mathematically verified, balanced Tally XML files ready for instant import into TallyPrime and Tally.ERP 9.
             </p>
 
             <div className="pt-1 flex items-center gap-2">
               <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold bg-emerald-950 text-emerald-300 border border-emerald-800">
                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                Free to Everyone • 50 Pages Daily
+                Free for Registered Users • 5 Bills Daily
               </span>
             </div>
           </div>
@@ -69,23 +69,23 @@ export function Footer() {
                 </Link>
               </li>
               <li>
-                <Link href="/convert" className="hover:text-white transition-colors">
-                  Conversion Studio
+                <Link href="/sales" className="hover:text-white transition-colors">
+                  Sales Invoice → Tally XML
                 </Link>
               </li>
               <li>
-                <Link href="/unlock-pdf" className="hover:text-white transition-colors">
-                  Unlock Bank Statement PDF
+                <Link href="/purchase" className="hover:text-white transition-colors">
+                  Purchase Invoice → Tally XML
                 </Link>
+              </li>
+              <li>
+                <a href="https://kangrahubtallyxml.netlify.app/" className="hover:text-white transition-colors">
+                  Bank Statement Import →
+                </a>
               </li>
               <li>
                 <Link href="/how-it-works" className="hover:text-white transition-colors">
-                  How It Works (4 Steps)
-                </Link>
-              </li>
-              <li>
-                <Link href="/supported-banks" className="hover:text-white transition-colors">
-                  Supported Banks (38+ Parsers)
+                  How It Works
                 </Link>
               </li>
               <li>

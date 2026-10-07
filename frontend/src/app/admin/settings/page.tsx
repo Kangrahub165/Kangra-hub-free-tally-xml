@@ -9,12 +9,22 @@ import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter }
 import { Input } from '@/components/ui/Input';
 import { Select } from '@/components/ui/Select';
 import { StatusAlert } from '@/components/ui/StatusAlert';
+import { AlertDialog } from '@/components/ui/AlertDialog';
 
 export default function AdminSettingsPage() {
   const [settings, setSettings] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [savedSuccess, setSavedSuccess] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [errorDialog, setErrorDialog] = useState<{
+    isOpen: boolean;
+    title: string;
+    message: string;
+  }>({
+    isOpen: false,
+    title: '',
+    message: '',
+  });
 
   useEffect(() => {
     getAdminSettings()
@@ -33,8 +43,12 @@ export default function AdminSettingsPage() {
       await updateAdminSettings(settings);
       setSavedSuccess(true);
       setTimeout(() => setSavedSuccess(false), 3000);
-    } catch {
-      alert('Failed to save settings');
+    } catch (err: any) {
+      setErrorDialog({
+        isOpen: true,
+        title: 'Settings Save Failed',
+        message: err?.message || 'Failed to update system configuration settings. Please check network connection and try again.',
+      });
     } finally {
       setSaving(false);
     }
@@ -59,7 +73,7 @@ export default function AdminSettingsPage() {
             System & Support Settings
           </h1>
           <p className="text-xs text-slate-500">
-            Configure global daily page quotas, upload bounds, and Section 129 project support parameters
+            Configure global daily bill quotas, upload bounds, and Section 129 project support parameters
           </p>
         </div>
       </div>
@@ -93,14 +107,14 @@ export default function AdminSettingsPage() {
           <CardContent className="space-y-5 pt-6">
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
               <div className="space-y-1.5">
-                <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider">Free Daily Page Limit (Per User)</label>
+                <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider">Free Daily Bill Limit (Per User)</label>
                 <Input
                   type="number"
                   value={settings.free_daily_page_limit}
                   onChange={(e) => setSettings({ ...settings, free_daily_page_limit: Number(e.target.value) })}
                   className="h-11 shadow-inner focus:ring-brand-500/20 focus:border-brand-500 text-sm font-bold"
                 />
-                <p className="text-[10px] text-slate-500 font-medium">Standard default: 50 pages per calendar day</p>
+                <p className="text-[10px] text-slate-500 font-medium">Standard default: 5 bills per calendar day</p>
               </div>
 
               <div className="space-y-1.5">
@@ -223,6 +237,15 @@ export default function AdminSettingsPage() {
         </Card>
 
       </form>
+
+      <AlertDialog
+        isOpen={errorDialog.isOpen}
+        onClose={() => setErrorDialog((prev) => ({ ...prev, isOpen: false }))}
+        title={errorDialog.title}
+        message={errorDialog.message}
+        variant="error"
+        buttonText="Close"
+      />
     </div>
   );
 }

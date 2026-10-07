@@ -16,8 +16,8 @@ export default function HowItWorksPage() {
       step: '01',
       title: 'Create Account & Verify Email',
       description:
-        'Sign up with your Full Name, Email, and Mobile Number. A fast OTP code verifies your account. Authentication allows the platform to securely store your recurring party-to-ledger mapping preferences and track your 50-page daily allowance.',
-      badge: '50 Free Pages Daily',
+        'Sign up with your Full Name, Email, and Mobile Number. A fast OTP code verifies your account. Authentication allows the platform to securely store your recurring party-to-ledger mapping preferences and track your 5 Free Bills daily allowance.',
+      badge: '5 Free Bills Daily',
       details: [
         'Secure OTP verification prevents unauthorized account access',
         'Daily quota resets automatically at midnight Asia/Kolkata',
@@ -34,7 +34,7 @@ export default function HowItWorksPage() {
       details: [
         'Automatic institution detection with 98%+ confidence score',
         'Encrypted PDF memory unlock with instant memory purge',
-        'Validation of PDF integrity and daily page quota',
+        'Validation of PDF integrity and daily bill quota',
       ],
       icon: <UploadCloud className="w-5 h-5 text-brand-600" />,
     },
@@ -120,21 +120,33 @@ export default function HowItWorksPage() {
           ))}
         </div>
 
-        {/* Tally Import Callout */}
+        {/* Invoice & Bank Import Callout */}
         <div className="mt-12 p-6 rounded-2xl bg-white border border-navy-200/60 shadow-card flex flex-col sm:flex-row items-center justify-between gap-6 text-left">
           <div className="space-y-1">
             <h3 className="text-sm font-bold text-navy-900">
-              Ready to test a bank statement?
+              Ready to process your invoices?
             </h3>
             <p className="text-xs text-navy-500">
-              Convert any digital bank statement and verify transactions in our live editor.
+              Process 5 bills every day for free with automatic GST tax calculations and Tally XML download.
             </p>
           </div>
-          <Link href="/convert" className="flex-shrink-0">
-            <Button variant="primary" size="md" iconRight={<ArrowRight className="w-4 h-4" />}>
-              Start Free Conversion
-            </Button>
-          </Link>
+          <div className="flex flex-wrap items-center gap-2.5 flex-shrink-0">
+            <Link href="/sales">
+              <Button variant="primary" size="md" iconRight={<ArrowRight className="w-4 h-4" />}>
+                Sales Invoice
+              </Button>
+            </Link>
+            <Link href="/purchase">
+              <Button variant="outline" size="md" iconRight={<ArrowRight className="w-4 h-4" />}>
+                Purchase Invoice
+              </Button>
+            </Link>
+            <a href="https://kangrahubtallyxml.netlify.app/">
+              <Button variant="ghost" size="md">
+                Bank Import →
+              </Button>
+            </a>
+          </div>
         </div>
 
       </div>

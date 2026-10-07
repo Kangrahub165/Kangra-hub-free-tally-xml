@@ -15,3 +15,7 @@ export * from './Tooltip';
 export * from './OtpInput';
 export * from './Skeleton';
 export * from './Toast';
+export * from './KangraLoader';
+export * from './ConfirmDialog';
+export * from './AlertDialog';
+export * from './GoldTick';

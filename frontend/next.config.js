@@ -7,6 +7,20 @@ const nextConfig = {
   images: {
     unoptimized: true,
   },
+  async redirects() {
+    return [
+      {
+        source: '/convert',
+        destination: 'https://kangrahubtallyxml.netlify.app/',
+        permanent: false,
+      },
+      {
+        source: '/convert/:path*',
+        destination: 'https://kangrahubtallyxml.netlify.app/',
+        permanent: false,
+      },
+    ];
+  },
   async rewrites() {
     return [
       {

@@ -34,7 +34,7 @@ export default function AdminUsagePage() {
             <Badge variant="primary" size="sm">Asia/Kolkata Midnight Reset</Badge>
           </div>
           <p className="text-xs text-slate-500 mt-1">
-            Real-time tracking of daily free page allowances, bank usage density, and server-side atomic quota enforcement.
+            Real-time tracking of daily free bill allowances, usage density, and server-side atomic quota enforcement.
           </p>
         </div>
         <Button variant="outline" size="sm" onClick={loadData} loading={loading} icon={<RefreshCw className="w-3.5 h-3.5" />}>
@@ -45,7 +45,7 @@ export default function AdminUsagePage() {
       {/* Top 4 Metric Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <Card className="p-5">
-          <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Pages Processed Today</span>
+          <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Bills Processed Today</span>
           <div className="text-2xl font-black text-slate-900 mt-2 font-mono tabular-nums">
             {usage?.total_pages_today || 0}
           </div>
@@ -55,7 +55,7 @@ export default function AdminUsagePage() {
         <Card className="p-5">
           <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Standard Free Limit</span>
           <div className="text-2xl font-black text-slate-900 mt-2 font-mono tabular-nums">
-            {usage?.free_daily_limit || 50} <span className="text-xs font-semibold text-slate-500">pgs/user</span>
+            {usage?.free_daily_limit || 5} <span className="text-xs font-semibold text-slate-500">bills/user</span>
           </div>
           <span className="text-[11px] text-slate-500 mt-1 inline-block">Applies to standard accounts</span>
         </Card>

@@ -58,15 +58,22 @@ export default function HistoryPage() {
               Conversion History
             </h1>
             <p className="text-xs text-slate-500">
-              Audit log of all statements converted with instant Tally XML download access
+              Audit log of all Sales & Purchase invoices processed with instant Tally XML download access
             </p>
           </div>
 
-          <Link href="/convert">
-            <Button variant="primary" size="md" iconRight={<ArrowRight className="w-4 h-4" />}>
-              Start New Conversion
-            </Button>
-          </Link>
+          <div className="flex items-center gap-2">
+            <Link href="/sales">
+              <Button variant="primary" size="md" iconRight={<ArrowRight className="w-4 h-4" />}>
+                Sales Invoice
+              </Button>
+            </Link>
+            <Link href="/purchase">
+              <Button variant="outline" size="md" iconRight={<ArrowRight className="w-4 h-4" />}>
+                Purchase Invoice
+              </Button>
+            </Link>
+          </div>
         </div>
 
         {/* Filter Toolbar */}
@@ -116,11 +123,11 @@ export default function HistoryPage() {
           ) : filtered.length === 0 ? (
             <EmptyState
               icon={<FileText className="w-6 h-6" />}
-              title={search ? 'No matching conversions' : 'No conversion history found'}
+              title={search ? 'No matching invoices' : 'No invoice conversion history found'}
               description={
                 search
-                  ? `No statements matched "${search}". Try resetting your filter.`
-                  : 'Any statements you upload and convert will appear here with instant XML download links.'
+                  ? `No invoices matched "${search}". Try resetting your filter.`
+                  : 'Any Sales or Purchase invoices you upload and convert will appear here with instant XML download links.'
               }
               action={
                 search ? (
@@ -128,11 +135,18 @@ export default function HistoryPage() {
                     Reset Filters
                   </Button>
                 ) : (
-                  <Link href="/convert">
-                    <Button variant="primary" size="sm" iconRight={<ArrowRight className="w-3.5 h-3.5" />}>
-                      Convert First Statement
-                    </Button>
-                  </Link>
+                  <div className="flex items-center gap-2">
+                    <Link href="/sales">
+                      <Button variant="primary" size="sm" iconRight={<ArrowRight className="w-3.5 h-3.5" />}>
+                        Convert Sales Invoice
+                      </Button>
+                    </Link>
+                    <Link href="/purchase">
+                      <Button variant="outline" size="sm">
+                        Convert Purchase Invoice
+                      </Button>
+                    </Link>
+                  </div>
                 )
               }
             />

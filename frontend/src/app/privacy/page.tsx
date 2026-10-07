@@ -90,7 +90,7 @@ export default function PrivacyPolicyPage() {
                   4. Account Credentials & Mapping Rules
                 </h2>
                 <p className="text-xs text-navy-600 leading-relaxed">
-                  We store basic account credentials (Name, verified Email, and Mobile Number) to administer your daily 50-page allowance and save your customized party-to-ledger mapping preferences. You may request account deletion or data wipe at any time through our support channel.
+                  We store basic account credentials (Name, verified Email, and Mobile Number) to administer your daily 5-bill allowance and save your customized party-to-ledger mapping preferences. You may request account deletion or data wipe at any time through our support channel.
                 </p>
               </div>
             </div>

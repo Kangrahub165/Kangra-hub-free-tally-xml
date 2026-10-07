@@ -485,7 +485,7 @@ export default function AdminPaymentsPage() {
         isOpen={Boolean(viewingScreenshotUrl)}
         onClose={() => setViewingScreenshotUrl(null)}
         title="Payment Confirmation Screenshot Proof"
-        description="Verify transaction timestamp, recipient UPI ID (9418250639@ybl), and paid amount."
+        description="Verify transaction timestamp, recipient UPI ID (Kangrahub@pnb), and paid amount."
         maxWidth="lg"
       >
         <div className="space-y-4">

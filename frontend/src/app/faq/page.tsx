@@ -16,13 +16,13 @@ const ALL_FAQS = [
   },
   {
     category: 'LIMITS',
-    question: "How does the 50 pages per day free limit work?",
-    answer: "Every registered user receives a free allowance of 50 PDF pages per calendar day based on the Asia/Kolkata timezone. The calculation is based on actual PDF pages, not file count. For example, if you upload a 20-page statement and a 15-page statement, you have used 35 pages and have 15 pages remaining."
+    question: "How does the 5 free bills per day limit work?",
+    answer: "Every registered user receives a free allowance of 5 bills per calendar day based on the Asia/Kolkata timezone. The calculation counts individual bills/invoices, not PDF pages. Even multi-page invoices count as 1 bill."
   },
   {
     category: 'LIMITS',
-    question: "What happens if my statement has more pages than my remaining daily limit?",
-    answer: "If your uploaded statement exceeds your remaining daily pages (e.g. you have 10 pages remaining but upload a 25-page PDF), the system alerts you before processing begins. We do not partially convert or silently drop transactions to ensure your accounting records remain complete."
+    question: "What happens if I exceed my remaining daily limit?",
+    answer: "If your uploaded invoices exceed your remaining daily bills, the system notifies you before processing begins. You can upgrade to a Staff Membership subscription for unlimited daily bill conversions or wait until your free allowance resets at midnight IST."
   },
   {
     category: 'LIMITS',
@@ -86,7 +86,7 @@ export default function FAQPage() {
               Frequently Asked Questions
             </h1>
             <p className="mt-3 text-sm text-navy-600 max-w-lg mx-auto leading-relaxed">
-              Clear answers regarding bank PDF statement conversions, Tally XML import specs, daily page allowances, and privacy guarantees.
+              Clear answers regarding invoice processing, Tally XML import specs, daily bill allowances, and privacy guarantees.
             </p>
 
             {/* Category Filter Pills */}
@@ -94,7 +94,7 @@ export default function FAQPage() {
               {[
                 { id: 'ALL', label: 'All Questions' },
                 { id: 'GENERAL', label: 'Platform & Parsing' },
-                { id: 'LIMITS', label: 'Daily 50-Page Quota' },
+                { id: 'LIMITS', label: 'Daily 5-Bill Quota' },
                 { id: 'SECURITY', label: 'Privacy & Passwords' },
                 { id: 'IMPORT', label: 'Tally Import Guide' },
               ].map((c) => (
@@ -158,17 +158,22 @@ export default function FAQPage() {
             <p className="text-xs text-navy-500 mb-5 max-w-sm mx-auto">
               Our support team reviews customer queries and statement formats regularly.
             </p>
-            <div className="flex flex-col sm:flex-row items-center justify-center gap-3">
-              <Link href="/contact">
-                <Button variant="outline" size="sm">
-                  Contact Support
-                </Button>
-              </Link>
-              <Link href="/convert">
+            <div className="flex flex-wrap items-center justify-center gap-3">
+              <Link href="/sales">
                 <Button variant="primary" size="sm" iconRight={<ArrowRight className="w-3.5 h-3.5" />}>
-                  Convert Statement Now
+                  Convert Sales Invoice
                 </Button>
               </Link>
+              <Link href="/purchase">
+                <Button variant="outline" size="sm" iconRight={<ArrowRight className="w-3.5 h-3.5" />}>
+                  Convert Purchase Invoice
+                </Button>
+              </Link>
+              <a href="https://kangrahubtallyxml.netlify.app/">
+                <Button variant="ghost" size="sm">
+                  Bank Statement Import →
+                </Button>
+              </a>
             </div>
           </div>
 

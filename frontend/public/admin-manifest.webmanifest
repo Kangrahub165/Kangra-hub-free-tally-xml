@@ -1,7 +1,7 @@
 {
   "name": "Kangra Hub — Admin Console",
   "short_name": "KH Admin",
-  "description": "Administrative command center and user management for Kangra Hub Free Tally XML.",
+  "description": "Administrative command center and user management for Kangra Hub — Sales & Purchase.",
   "start_url": "/admin",
   "display": "standalone",
   "background_color": "#000000",

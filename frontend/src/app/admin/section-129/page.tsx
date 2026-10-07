@@ -11,7 +11,7 @@ import { Card } from '@/components/ui/Card';
 export default function Section129Page() {
   const [data, setData] = useState<any>({
     buy_coffee_enabled: true,
-    buy_coffee_upi_id: '9418250639@ybl',
+    buy_coffee_upi_id: 'Kangrahub@pnb',
     buy_coffee_payment_url: 'https://buymeacoffee.com',
     buy_coffee_button_text: 'Support Kangra Hub',
     buy_coffee_message: 'Voluntary developer support contribution.'

@@ -42,6 +42,7 @@ import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { Modal } from '@/components/ui/Modal';
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 
 function AdminNotificationsContent() {
   const router = useRouter();
@@ -56,6 +57,13 @@ function AdminNotificationsContent() {
   const [selectedMessage, setSelectedMessage] = useState<any | null>(null);
   const [isMessageModalOpen, setIsMessageModalOpen] = useState(false);
   const [copiedEmail, setCopiedEmail] = useState(false);
+  const [deleteConfirmDialog, setDeleteConfirmDialog] = useState<{
+    isOpen: boolean;
+    msgId: string | null;
+  }>({
+    isOpen: false,
+    msgId: null,
+  });
 
   // Broadcast banners state
   const [broadcastData, setBroadcastData] = useState<any>({
@@ -132,8 +140,14 @@ function AdminNotificationsContent() {
     } catch {}
   };
 
-  const handleDeleteMessage = async (msgId: string) => {
-    if (!confirm('Are you sure you want to delete this contact submission?')) return;
+  const handleDeleteMessage = (msgId: string) => {
+    setDeleteConfirmDialog({
+      isOpen: true,
+      msgId,
+    });
+  };
+
+  const executeDeleteMessage = async (msgId: string) => {
     try {
       await deleteAdminContactMessage(msgId);
       setContactMessages((prev) => prev.filter((m) => m.id !== msgId));
@@ -145,8 +159,8 @@ function AdminNotificationsContent() {
     } catch {}
   };
 
-  const handleDeleteFromModal = async (msgId: string) => {
-    await handleDeleteMessage(msgId);
+  const handleDeleteFromModal = (msgId: string) => {
+    handleDeleteMessage(msgId);
   };
 
   const handleCopyEmail = (email: string) => {
@@ -765,6 +779,23 @@ function AdminNotificationsContent() {
           </div>
         )}
       </Modal>
+
+      {/* PROFESSIONAL CONFIRMATION DIALOG FOR DELETE */}
+      <ConfirmDialog
+        isOpen={deleteConfirmDialog.isOpen}
+        onClose={() => setDeleteConfirmDialog({ isOpen: false, msgId: null })}
+        onConfirm={async () => {
+          if (deleteConfirmDialog.msgId) {
+            await executeDeleteMessage(deleteConfirmDialog.msgId);
+          }
+          setDeleteConfirmDialog({ isOpen: false, msgId: null });
+        }}
+        title="Delete Contact Submission?"
+        message="This will permanently remove this customer message and inquiry from the database. This action cannot be undone."
+        confirmText="Delete Submission"
+        cancelText="Cancel"
+        variant="danger"
+      />
     </div>
   );
 }

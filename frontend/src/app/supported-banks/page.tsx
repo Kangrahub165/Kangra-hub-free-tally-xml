@@ -186,16 +186,23 @@ export default function SupportedBanksPage() {
         {/* Bottom CTA Card */}
         <Card className="mt-14 max-w-2xl mx-auto p-8 text-center shadow-card">
           <h3 className="text-base font-bold text-navy-900 mb-1.5">
-            Have a statement ready to convert?
+            Looking for Bank Statement Conversion?
           </h3>
           <p className="text-xs text-navy-500 mb-6 max-w-md mx-auto leading-relaxed">
-            Convert your statement into balanced Tally XML vouchers in under 30 seconds.
+            Convert bank statement PDFs into balanced Tally XML on our dedicated bank portal.
           </p>
-          <Link href="/convert">
-            <Button variant="primary" size="md" iconRight={<ArrowRight className="w-4 h-4" />}>
-              Start Conversion Studio
-            </Button>
-          </Link>
+          <div className="flex flex-wrap items-center justify-center gap-3">
+            <a href="https://kangrahubtallyxml.netlify.app/">
+              <Button variant="primary" size="md" iconRight={<ArrowRight className="w-4 h-4" />}>
+                Open Bank Import →
+              </Button>
+            </a>
+            <Link href="/sales">
+              <Button variant="outline" size="md">
+                Convert Sales Invoice
+              </Button>
+            </Link>
+          </div>
         </Card>
 
       </div>

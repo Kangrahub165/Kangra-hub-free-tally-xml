@@ -56,74 +56,45 @@ function AdminLoginForm() {
     setLoading(true);
 
     try {
-      const supabase = getSupabaseClient();
-      let token: string | null = null;
-      let isAdminVerified = false;
+      clearAuthToken();
+      const data = await adminLogin(cleanEmail, password);
+      if (!data || !data.token || !data.is_admin) {
+        clearAuthToken();
+        setError('Invalid credentials / Login failed: Access denied. This portal is restricted to authorized administrators.');
+        setLoading(false);
+        return;
+      }
 
-      // 1. Try direct Supabase authentication if client keys are present
-      if (supabase) {
+      setAuthToken(data.token, true);
+      const check = await verifyAdmin();
+      if (!check || !check.is_admin) {
+        clearAuthToken();
+        setError('Invalid credentials / Login failed: Access denied. This portal is restricted to authorized administrators.');
+        setLoading(false);
+        return;
+      }
+
+      let destination = '/admin';
+      if (nextUrl && nextUrl.startsWith('/admin') && !nextUrl.startsWith('/admin/login')) {
         try {
-          const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
-            email: cleanEmail,
-            password: password,
-          });
-
-          if (!authError && authData.session?.access_token) {
-            token = authData.session.access_token;
-            setAuthToken(token, true);
-            try {
-              const check = await verifyAdmin();
-              if (check && check.is_admin) {
-                isAdminVerified = true;
-              } else {
-                await supabase.auth.signOut();
-                clearAuthToken();
-                token = null;
-              }
-            } catch {
-              await supabase.auth.signOut();
-              clearAuthToken();
-              token = null;
-            }
-          }
+          const parsed = new URL(nextUrl, 'http://localhost');
+          parsed.searchParams.delete('expired');
+          parsed.searchParams.delete('error');
+          parsed.searchParams.delete('denied');
+          const searchPart = parsed.searchParams.toString();
+          destination = parsed.pathname + (searchPart ? `?${searchPart}` : '');
         } catch {
-          // Continue to backend fallback
+          destination = nextUrl.split('?')[0];
         }
       }
-
-      // 2. Fallback to backend authentication proxy (supports local dev credentials & server Supabase verification)
-      if (!isAdminVerified) {
-        const data = await adminLogin(cleanEmail, password);
-        if (data && data.is_admin && data.token) {
-          token = data.token;
-          setAuthToken(token, true);
-          isAdminVerified = true;
-        } else {
-          clearAuthToken();
-          setError('Access denied. This login portal is restricted to authorized administrators.');
-          setLoading(false);
-          return;
-        }
-      }
-
-      if (isAdminVerified && token) {
-        let destination = '/admin';
-        if (nextUrl && nextUrl.startsWith('/admin') && !nextUrl.startsWith('/admin/login')) {
-          try {
-            const parsed = new URL(nextUrl, 'http://localhost');
-            parsed.searchParams.delete('expired');
-            parsed.searchParams.delete('error');
-            parsed.searchParams.delete('denied');
-            const searchPart = parsed.searchParams.toString();
-            destination = parsed.pathname + (searchPart ? `?${searchPart}` : '');
-          } catch {
-            destination = nextUrl.split('?')[0];
-          }
-        }
-        router.push(destination);
-      }
+      router.push(destination);
     } catch (err: any) {
-      setError('Access denied. This login portal is restricted to authorized administrators.');
+      clearAuthToken();
+      const rawMsg = err?.message || '';
+      const msg = (rawMsg && !rawMsg.toLowerCase().includes('jwt') && !rawMsg.toLowerCase().includes('claims'))
+        ? rawMsg
+        : 'Invalid credentials / Login failed: Access denied. This portal is restricted to authorized administrators.';
+      setError(msg);
     } finally {
       setLoading(false);
     }
@@ -283,16 +254,14 @@ function AdminLoginForm() {
           </form>
         </div>
 
-        {/* Back Link & PWA Install */}
-        <div className="flex flex-col sm:flex-row items-center justify-center gap-3 mt-6">
+        {/* Back Link */}
+        <div className="flex items-center justify-center mt-6">
           <Link
             href="/"
             className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-400 hover:text-white transition-colors"
           >
             <ArrowLeft className="w-3.5 h-3.5" /> Return to Public Portal
           </Link>
-          <span className="text-slate-600 hidden sm:inline">•</span>
-          <AdminPwaInstall variant="login" />
         </div>
 
       </div>

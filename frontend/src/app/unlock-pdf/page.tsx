@@ -251,16 +251,16 @@ export default function UnlockPdfPage() {
                 <span>Zero permanent disk storage. Decrypted in ephemeral volatile RAM.</span>
               </div>
 
-              <Link href="/convert">
+              <a href="https://kangrahubtallyxml.netlify.app/">
                 <Button
                   variant="outline"
                   size="sm"
                   iconRight={<ArrowRight className="w-4 h-4" />}
                   className="text-xs font-semibold"
                 >
-                  Go directly to Tally XML Converter
+                  Bank Statement Import →
                 </Button>
-              </Link>
+              </a>
             </div>
           </div>
         </Card>

@@ -161,7 +161,7 @@ export default function SettingsPage() {
                   label="Timezone"
                   value={profileTimezone}
                   onChange={(e) => setProfileTimezone(e.target.value)}
-                  helperText="Your daily 50-page quota resets at 00:00 Asia/Kolkata."
+                  helperText="Your daily 5-bill quota resets at 00:00 Asia/Kolkata."
                 >
                   <option value="Asia/Kolkata">Asia/Kolkata (IST +05:30)</option>
                   <option value="UTC">UTC (Universal Coordinated Time)</option>
@@ -334,7 +334,7 @@ export default function SettingsPage() {
             <CardHeader>
               <CardTitle>Account Tier & Allowance Details</CardTitle>
               <CardDescription>
-                Review your daily page processing quota and tier specifications
+                Review your daily bill processing quota and tier specifications
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
@@ -347,8 +347,8 @@ export default function SettingsPage() {
 
                 <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200/80">
                   <div className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Daily Allowance</div>
-                  <div className="text-lg font-black text-brand-600 mt-1">50 Pages / Day</div>
-                  <div className="text-[11px] text-slate-500 mt-0.5">Calculated on actual parsed pages</div>
+                  <div className="text-lg font-black text-brand-600 mt-1">5 Free Bills Daily</div>
+                  <div className="text-[11px] text-slate-500 mt-0.5">Calculated on processed bills/invoices</div>
                 </div>
 
                 <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200/80">
@@ -363,7 +363,7 @@ export default function SettingsPage() {
                 <div className="space-y-1">
                   <div className="font-bold">Need unlimited daily conversion volume?</div>
                   <p className="text-slate-600 text-[11px] leading-relaxed">
-                    Chartered accountant firms and high-volume businesses can contact platform administration through the Contact page to request exemption from daily page limits.
+                    Chartered accountant firms and high-volume businesses can contact platform administration through the Contact page to request exemption from daily bill limits.
                   </p>
                 </div>
               </div>

@@ -1,7 +1,7 @@
 {
-  "name": "Kangra Hub — Free Tally XML",
+  "name": "Kangra Hub — Sales & Purchase",
   "short_name": "Kangra Hub",
-  "description": "Convert bank statement PDFs into Tally-ready XML files with accurate double-entry balancing.",
+  "description": "Convert Sales and Purchase invoice PDFs into Tally-ready XML vouchers with OCR and GST validation.",
   "start_url": "/dashboard",
   "display": "standalone",
   "background_color": "#000000",

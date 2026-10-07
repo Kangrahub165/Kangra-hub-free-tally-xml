@@ -5,7 +5,7 @@ import Link from 'next/link';
 import Image from 'next/image';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { ArrowRight, Mail, Lock, Eye, EyeOff, CheckCircle2 } from 'lucide-react';
-import { userLogin, adminLogin } from '@/lib/api';
+import { userLogin, adminLogin, clearAuthToken } from '@/lib/api';
 import { useAuth } from '@/components/auth/AuthProvider';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
@@ -23,7 +23,7 @@ function LoginForm() {
     } catch {}
   }
   const isExpired = searchParams.get('expired') === 'true';
-  const { isAuthenticated, isLoading, isAdmin, login } = useAuth();
+  const { isAuthenticated, isLoading, isAdmin, login, logout } = useAuth();
   const [isMounted, setIsMounted] = useState(false);
 
   const [email, setEmail] = useState('');
@@ -32,10 +32,18 @@ function LoginForm() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [infoMessage, setInfoMessage] = useState('');
+  const [shakePassword, setShakePassword] = useState(false);
 
   useEffect(() => {
     setIsMounted(true);
   }, []);
+
+  const triggerShake = () => {
+    setShakePassword(true);
+    setTimeout(() => {
+      setShakePassword(false);
+    }, 450);
+  };
 
   const target = (nextUrl && (!nextUrl.startsWith('/admin') || isAdmin))
     ? nextUrl
@@ -69,47 +77,28 @@ function LoginForm() {
     const cleanEmail = email.trim();
     if (!cleanEmail || !password) {
       setError('Please enter both your email address and password.');
+      triggerShake();
       return;
     }
 
     setLoading(true);
 
     try {
-      // 1. Primary: Standard user authentication
-      try {
-        const data = await userLogin(cleanEmail, password);
-        login(data.token, data.user?.role === 'ADMIN', data.refresh_token, data.user);
-        let dest = '/dashboard';
-        if (nextUrl && (!nextUrl.startsWith('/admin') || data.user?.role === 'ADMIN')) {
-          dest = nextUrl;
-        }
-        window.location.href = dest;
-        return;
-      } catch (err: any) {
-        if (
-          err.status === 403 ||
-          err.code === 'ACCOUNT_SUSPENDED' ||
-          (err.message && err.message.toLowerCase().includes('suspended'))
-        ) {
-          throw err;
-        }
-
-        // 2. Fallback: Check if administrator credentials were submitted on standard login
-        try {
-          const adminData = await adminLogin(cleanEmail, password);
-          if (adminData && adminData.token) {
-            login(adminData.token, true, undefined, adminData.user);
-            let dest = nextUrl || '/convert';
-            window.location.href = dest;
-            return;
-          }
-        } catch {
-          // Fall back to showing original login error
-        }
-
-        throw err;
+      const data = await userLogin(cleanEmail, password);
+      if (!data || !data.token) {
+        throw new Error('Invalid credentials / Login failed. Please check your credentials and try again.');
       }
+      login(data.token, data.user?.role === 'ADMIN', data.refresh_token, data.user);
+      let dest = '/dashboard';
+      if (nextUrl && (!nextUrl.startsWith('/admin') || data.user?.role === 'ADMIN')) {
+        dest = nextUrl;
+      }
+      window.location.href = dest;
+      return;
     } catch (err: any) {
+      clearAuthToken();
+      logout();
+      triggerShake();
       if (
         err.status === 403 ||
         err.code === 'ACCOUNT_SUSPENDED' ||
@@ -125,12 +114,11 @@ function LoginForm() {
         router.push(`/suspended?${queryParams.toString()}`);
         return;
       }
-      const msg = err.message || 'Invalid email or password. Please check your credentials and try again.';
-      if (msg.toLowerCase().includes('jwt') || msg.toLowerCase().includes('claims') || msg.toLowerCase().includes('signature')) {
-        setError('Invalid email or password. Please try again.');
-      } else {
-        setError(msg);
-      }
+      const rawMsg = err.message || '';
+      const msg = (rawMsg && !rawMsg.toLowerCase().includes('jwt') && !rawMsg.toLowerCase().includes('claims'))
+        ? rawMsg
+        : 'Invalid credentials / Login failed. Please check your email and password.';
+      setError(msg);
     } finally {
       setLoading(false);
     }
@@ -187,41 +175,41 @@ function LoginForm() {
                   Kangra Hub
                 </span>
                 <span className="text-[10px] font-bold text-brand-300 tracking-wider uppercase">
-                  Free Tally XML
+                  Sales & Purchase
                 </span>
               </div>
             </Link>
 
             <div className="space-y-3 pt-4">
               <Badge variant="success" size="sm" pulse>
-                Daily 50-Page Free Quota
+                Daily 5 Free Bills Quota
               </Badge>
               <h2 className="text-xl font-extrabold text-white tracking-tight leading-snug">
-                The modern standard for statement to Tally conversion.
+                The modern standard for invoice to Tally conversion.
               </h2>
               <p className="text-xs text-navy-300 leading-relaxed">
-                Log into your account to convert bank statements, customize recurring party mappings, and monitor transaction math audits.
+                Log into your account to convert Sales and Purchase invoices, map GST ledgers & stock items, and download Tally XML vouchers.
               </p>
             </div>
 
             <div className="space-y-2.5 pt-2">
               <div className="flex items-center gap-2.5 text-xs text-navy-300">
                 <CheckCircle2 className="w-4 h-4 text-emerald-400 flex-shrink-0" />
-                <span>38+ Bank statement templates supported</span>
+                <span>Sales & Purchase invoice OCR extraction</span>
               </div>
               <div className="flex items-center gap-2.5 text-xs text-navy-300">
                 <CheckCircle2 className="w-4 h-4 text-emerald-400 flex-shrink-0" />
-                <span>Double-entry balance check before export</span>
+                <span>Automatic GST (CGST/SGST/IGST) tax breakdown</span>
               </div>
               <div className="flex items-center gap-2.5 text-xs text-navy-300">
                 <CheckCircle2 className="w-4 h-4 text-emerald-400 flex-shrink-0" />
-                <span>Zero permanent financial PDF storage</span>
+                <span>5 Free Bills Daily • Staff Membership for Unlimited Access</span>
               </div>
             </div>
           </div>
 
           <div className="relative z-10 pt-6 border-t border-navy-800 text-[11px] text-navy-400">
-            🔒 Bank statements processed in ephemeral RAM.
+            🔒 Invoices processed securely with ephemeral memory.
           </div>
         </div>
 
@@ -290,7 +278,11 @@ function LoginForm() {
                     placeholder="••••••••"
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
-                    className="w-full bg-white text-sm text-navy-900 placeholder:text-navy-400 rounded-xl border border-navy-300/60 pl-10 pr-10 py-2.5 transition-all focus:outline-none focus:ring-2 focus:ring-brand-500/20 focus:border-accent-500 focus:ring-accent-500/20"
+                    className={`w-full bg-white text-sm text-navy-900 placeholder:text-navy-400 rounded-xl border pl-10 pr-10 py-2.5 transition-all focus:outline-none focus:ring-2 ${
+                      shakePassword
+                        ? 'animate-shake border-rose-500 ring-2 ring-rose-200 bg-rose-50/20'
+                        : 'border-navy-300/60 focus:ring-brand-500/20 focus:border-accent-500 focus:ring-accent-500/20'
+                    }`}
                     autoComplete="current-password"
                   />
                   <button
@@ -322,7 +314,7 @@ function LoginForm() {
                 href={`/signup${nextUrl ? `?redirect=${encodeURIComponent(nextUrl)}` : ''}`}
                 className="font-bold text-brand-600 hover:text-brand-700"
               >
-                Create Free Account (50 Pgs/Day)
+                Create Free Account (5 Free Bills Daily)
               </Link>
             </div>
 

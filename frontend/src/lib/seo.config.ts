@@ -1,9 +1,9 @@
 export const SEO_CONFIG = {
-  siteName: "Kangra Hub Free Tally XML",
-  shortName: "Kangra Tally XML",
+  siteName: "Kangra Hub — Sales & Purchase",
+  shortName: "Kangra Hub Sales & Purchase",
   siteUrl: process.env.NEXT_PUBLIC_SITE_URL || "https://tally.kangrahub.com",
-  defaultTitle: "Kangra Hub Free Tally XML – Bank Statement PDF to Tally XML Converter",
-  defaultDescription: "Convert supported bank statement PDFs into Tally-ready XML files with Kangra Hub Free Tally XML. Fast, secure, and accurate bank statement conversion.",
+  defaultTitle: "Kangra Hub — Sales & Purchase | Invoice PDF to Tally XML Converter",
+  defaultDescription: "Convert Sales and Purchase invoice PDFs into Tally-ready XML vouchers with Kangra Hub. Fast OCR, accurate GST tax breakdown, ledger and stock item mapping.",
   defaultImage: "/og-image.png",
   twitterHandle: "@anil_sanyal",
   socialProfiles: {
@@ -19,3 +19,4 @@ export const SEO_CONFIG = {
     "https://www.youtube.com/@kangra_hub"
   ]
 };
+

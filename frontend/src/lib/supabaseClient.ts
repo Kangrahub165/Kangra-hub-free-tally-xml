@@ -1,7 +1,9 @@
-﻿import { createClient, SupabaseClient } from '@supabase/supabase-js';
+import { createClient, SupabaseClient } from '@supabase/supabase-js';
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
-const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
+const rawAnonKey = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
+// Clean and validate key string - ignore placeholder templates like '<provided_publishable_key>'
+const supabaseAnonKey = (rawAnonKey && !rawAnonKey.startsWith('<') && !rawAnonKey.includes('placeholder')) ? rawAnonKey.trim() : '';
 
 let supabaseInstance: SupabaseClient | null = null;
 

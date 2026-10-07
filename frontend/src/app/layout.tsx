@@ -6,6 +6,7 @@ import { Footer } from '@/components/Footer';
 import { SEO_CONFIG } from '@/lib/seo.config';
 import { PwaInstallManager } from '@/components/pwa/PwaInstallManager';
 import { AuthProvider } from '@/components/auth/AuthProvider';
+import { MobileBottomNav } from '@/components/MobileBottomNav';
 
 const inter = Inter({
   subsets: ['latin'],
@@ -23,13 +24,13 @@ export const metadata: Metadata = {
   applicationName: SEO_CONFIG.siteName,
   authors: [{ name: 'Kangra Hub' }],
   keywords: [
-    'bank statement to tally xml',
-    'bank statement pdf to tally xml',
-    'pdf to tally xml converter',
-    'free tally xml converter',
-    'bank statement converter',
-    'tally xml generator',
-    'bank statement to tally'
+    'sales invoice to tally xml',
+    'purchase invoice to tally xml',
+    'invoice pdf to tally xml',
+    'gst invoice tally xml converter',
+    'sales purchase tally prime converter',
+    'invoice ocr to tally',
+    'kangra hub sales purchase'
   ],
   openGraph: {
     type: 'website',
@@ -43,7 +44,7 @@ export const metadata: Metadata = {
         url: `${SEO_CONFIG.siteUrl}/og-image.png`,
         width: 1200,
         height: 630,
-        alt: 'Kangra Hub Free Tally XML',
+        alt: 'Kangra Hub — Sales & Purchase',
       },
     ],
   },
@@ -91,9 +92,10 @@ export default function RootLayout({
       <body className="font-sans antialiased min-h-screen flex flex-col justify-between">
         <AuthProvider>
           <Header />
-          <main className="flex-1">{children}</main>
+          <main className="flex-1 pb-16 md:pb-0">{children}</main>
           <Footer />
           <PwaInstallManager mode="USER" />
+          <MobileBottomNav />
         </AuthProvider>
       </body>
     </html>

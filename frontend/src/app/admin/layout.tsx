@@ -29,7 +29,8 @@ import {
   Sparkles,
   History,
   KeyRound,
-  CreditCard
+  CreditCard,
+  ExternalLink
 } from 'lucide-react';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
@@ -38,6 +39,7 @@ import { getAuthToken, clearAuthToken, verifyAdmin } from '@/lib/api';
 import { useAuth } from '@/components/auth/AuthProvider';
 import { AdminNotificationBell } from '@/components/admin/AdminNotificationBell';
 import { AdminPwaInstall } from '@/components/admin/AdminPwaInstall';
+import { KangraLoader } from '@/components/ui/KangraLoader';
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
@@ -116,10 +118,13 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
   // Strictly block rendering of any admin components until verification succeeds
   if (isAdmin !== true) {
     return (
-      <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center p-6 text-slate-400">
-        <div className="flex items-center gap-3 text-xs font-semibold">
-          <div className="w-5 h-5 border-2 border-brand-500 border-t-transparent rounded-full animate-spin" />
-          <span>Verifying administrator privileges...</span>
+      <div className="min-h-screen bg-slate-900 flex flex-col items-center justify-center p-6 text-slate-150">
+        <div className="bg-white/95 border border-slate-200/80 p-8 rounded-3xl shadow-2xl max-w-sm w-full mx-4 backdrop-blur-sm">
+          <KangraLoader
+            size="md"
+            text="Verifying admin credentials..."
+            subtext="Authorizing administrative workspace"
+          />
         </div>
       </div>
     );
@@ -127,63 +132,21 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
 
   const adminNavGroups = [
     {
-      title: 'ADMIN CONSOLE',
+      title: 'MAIN WEBSITE ADMIN',
       items: [
         { label: 'Overview', href: '/admin', icon: LayoutDashboard },
+        { label: 'Staff & Verified Tier', href: '/admin/staff', icon: ShieldCheck },
+        { label: 'User Management', href: '/admin/users', icon: Users },
+        { label: 'User Activity Logs', href: '/admin/activity', icon: History },
+        { label: 'Ratings & Reviews', href: '/admin/reviews', icon: Sparkles },
       ]
     },
     {
-      title: 'CONVERSION',
+      title: 'SECURITY & SETTINGS',
       items: [
-        { label: 'Convert Statement', href: '/admin/convert', icon: Sparkles },
-        { label: 'Conversion History', href: '/admin/history', icon: History },
-        { label: 'Conversions Monitor', href: '/admin/conversions', icon: FileSpreadsheet },
-      ]
-    },
-    {
-      title: 'USERS & BILLING',
-      items: [
-        { label: 'Users & Access', href: '/admin/users', icon: Users },
-        { label: 'Usage & Quotas', href: '/admin/usage', icon: Gauge },
-        { label: 'Page Purchase Requests', href: '/admin/payments', icon: CreditCard },
-        { label: 'Account Recovery', href: '/admin/recovery', icon: KeyRound },
-        { label: 'Account Appeals', href: '/admin/appeals', icon: ShieldAlert },
-      ]
-    },
-    {
-      title: 'PARSING',
-      items: [
-        { label: 'Banks & Parsers', href: '/admin/parsers', icon: Layers },
-        { label: 'Statement Testing Lab', href: '/admin/testing-lab', icon: FlaskConical },
-      ]
-    },
-    {
-      title: 'ACCOUNTING',
-      items: [
-        { label: 'Ledger & Accounting', href: '/admin/accounting', icon: Calculator },
-      ]
-    },
-    {
-      title: 'PLATFORM',
-      items: [
-        { label: 'Site Configuration', href: '/admin/settings', icon: SlidersHorizontal },
-        { label: 'Analytics', href: '/admin/analytics', icon: BarChart3 },
-        { label: 'Notifications', href: '/admin/notifications', icon: Bell },
-      ]
-    },
-    {
-      title: 'SYSTEM',
-      items: [
-        { label: 'File & Processing', href: '/admin/processing', icon: HardDrive },
-        { label: 'Security', href: '/admin/security', icon: Shield },
-        { label: 'Audit Logs', href: '/admin/logs', icon: ShieldAlert },
-      ]
-    },
-    {
-      title: 'ADMIN',
-      items: [
-        { label: 'Section 129', href: '/admin/section-129', icon: Coffee },
-        { label: 'Admin Settings', href: '/admin/system', icon: SettingsIcon },
+        { label: 'Security & Audit Logs', href: '/admin/security', icon: ShieldAlert },
+        { label: 'Real-Time Notifications', href: '/admin/notifications', icon: Bell },
+        { label: 'Website Settings', href: '/admin/settings', icon: SlidersHorizontal },
       ]
     },
   ];
@@ -278,6 +241,15 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
 
         {/* Sidebar Footer */}
         <div className="pt-4 mt-6 border-t border-slate-800/80 space-y-2.5">
+          <a
+            href="https://kangrahubtallyxml.netlify.app/"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center justify-between px-3 py-2 rounded-xl bg-slate-900/60 hover:bg-slate-800 text-[11px] font-semibold text-slate-300 hover:text-white border border-slate-700/50 transition-colors group"
+          >
+            <span>Bank Statement Admin</span>
+            <ExternalLink className="w-3.5 h-3.5 text-slate-400 group-hover:text-white" />
+          </a>
           <AdminPwaInstall 
             variant="sidebar" 
             onAction={() => setMobileSidebarOpen(false)} 

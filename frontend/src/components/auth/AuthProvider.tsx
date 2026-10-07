@@ -1,20 +1,31 @@
 'use client';
 
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
-import { getAuthToken, setAuthToken, clearAuthToken, getUserRole, getRefreshToken } from '@/lib/api';
+import { getAuthToken, setAuthToken, clearAuthToken, getUserRole, getRefreshToken, getUserProfile } from '@/lib/api';
 import { getSupabaseClient } from '@/lib/supabaseClient';
 
 export interface UserSession {
   id: string;
   email: string;
-  role: 'ADMIN' | 'USER';
+  role: 'ADMIN' | 'STAFF' | 'USER';
   fullName?: string;
+  mobileNumber?: string;
+  gender?: string;
+  emailVerified?: boolean;
+  isStaff?: boolean;
+  isGold?: boolean;
+  staffSource?: string;
+  subscriptionExpiry?: string;
+  isExpired?: boolean;
 }
 
 interface AuthContextType {
   token: string | null;
   user: UserSession | null;
   isAdmin: boolean;
+  isStaff: boolean;
+  isGold: boolean;
+  isExpired: boolean;
   isAuthenticated: boolean;
   isLoading: boolean;
   login: (token: string, isAdmin?: boolean, refreshToken?: string, user?: any) => void;
@@ -26,6 +37,9 @@ const AuthContext = createContext<AuthContextType>({
   token: null,
   user: null,
   isAdmin: false,
+  isStaff: false,
+  isGold: false,
+  isExpired: false,
   isAuthenticated: false,
   isLoading: true,
   login: () => {},
@@ -42,19 +56,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const syncStateFromStorage = useCallback(() => {
     if (typeof window === 'undefined') return;
     const storedToken = localStorage.getItem('kh_auth_token');
-    const storedRole = getUserRole();
-    const isUserAdmin = storedRole === 'ADMIN';
-
-    if (storedToken) {
-      setTokenState(storedToken);
-      setIsAdmin(isUserAdmin);
-      const isSecure = window.location.protocol === 'https:';
-      const secureFlag = isSecure ? '; Secure' : '';
-      document.cookie = `kh_auth_token=${encodeURIComponent(storedToken)}; path=/; max-age=604800; SameSite=Lax${secureFlag}`;
-      if (isUserAdmin) {
-        document.cookie = `kh_is_admin=true; path=/; max-age=604800; SameSite=Lax${secureFlag}`;
-      }
-    } else {
+    if (!storedToken) {
       setTokenState(null);
       setUser(null);
       setIsAdmin(false);
@@ -68,73 +70,59 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         return;
       }
 
-      // 1. Initial quick local check from storage
-      const existingToken = localStorage.getItem('kh_auth_token');
-      const storedRole = getUserRole();
-      const initialIsAdmin = storedRole === 'ADMIN';
-
-      if (existingToken) {
-        setTokenState(existingToken);
-        setIsAdmin(initialIsAdmin);
-        // Ensure cookies match storage
-        const isSecure = window.location.protocol === 'https:';
-        const secureFlag = isSecure ? '; Secure' : '';
-        document.cookie = `kh_auth_token=${encodeURIComponent(existingToken)}; path=/; max-age=604800; SameSite=Lax${secureFlag}`;
-        if (initialIsAdmin) {
-          document.cookie = `kh_is_admin=true; path=/; max-age=604800; SameSite=Lax${secureFlag}`;
-        }
+      const storedToken = getAuthToken();
+      if (!storedToken) {
+        clearAuthToken();
+        setTokenState(null);
+        setUser(null);
+        setIsAdmin(false);
+        setIsLoading(false);
+        return;
       }
 
-      // 2. Query Supabase client if configured
-      const supabase = getSupabaseClient();
-      if (supabase) {
-        try {
-          const { data: { session } } = await supabase.auth.getSession();
-          if (session && session.access_token) {
-            const role = (session.user?.user_metadata?.role === 'ADMIN' || storedRole === 'ADMIN') ? 'ADMIN' : 'USER';
-            const userObj: UserSession = {
-              id: session.user.id,
-              email: session.user.email || '',
-              role: role,
-              fullName: session.user.user_metadata?.full_name || '',
-            };
-            setAuthToken(session.access_token, role === 'ADMIN', session.refresh_token);
-            setTokenState(session.access_token);
-            setUser(userObj);
-            setIsAdmin(role === 'ADMIN');
-          } else if (!existingToken) {
-            setTokenState(null);
-            setUser(null);
-            setIsAdmin(false);
-          }
-        } catch (sbErr) {
-          console.warn('Error querying Supabase session:', sbErr);
+      // Strictly validate the session token against backend /api/auth/me
+      try {
+        const profile = await getUserProfile();
+        if (
+          profile &&
+          profile.id &&
+          profile.account_status !== 'SUSPENDED' &&
+          profile.account_status !== 'BLOCKED' &&
+          profile.account_status !== 'DEACTIVATED'
+        ) {
+          const isUserAdmin = profile.role === 'ADMIN' || profile.role === 'SUPER_ADMIN';
+          const isExpired = !isUserAdmin && !!profile.subscription_expiry && new Date(profile.subscription_expiry) < new Date();
+          const isUserStaff = isUserAdmin || ((profile.role === 'STAFF' || !!profile.is_staff) && !isExpired);
+          const userObj: UserSession = {
+            id: profile.id,
+            email: profile.email,
+            role: isUserAdmin ? 'ADMIN' : (profile.role === 'STAFF' ? (isExpired ? 'USER' : 'STAFF') : 'USER'),
+            fullName: profile.full_name || '',
+            mobileNumber: profile.mobile_number || '',
+            gender: profile.gender || '',
+            emailVerified: profile.email_verified,
+            isStaff: isUserStaff,
+            isGold: isUserAdmin || (!!profile.is_gold && !isExpired),
+            staffSource: profile.staff_source,
+            subscriptionExpiry: profile.subscription_expiry,
+            isExpired: isExpired,
+          };
+          setTokenState(storedToken);
+          setUser(userObj);
+          setIsAdmin(isUserAdmin);
+        } else {
+          // Account suspended, deactivated, or invalid profile
+          clearAuthToken();
+          setTokenState(null);
+          setUser(null);
+          setIsAdmin(false);
         }
-
-        // 3. Register real-time auth listener for token renewals and sign-ins/outs
-        const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
-          if (session && session.access_token) {
-            const role = (session.user?.user_metadata?.role === 'ADMIN' || getUserRole() === 'ADMIN') ? 'ADMIN' : 'USER';
-            setAuthToken(session.access_token, role === 'ADMIN', session.refresh_token);
-            setTokenState(session.access_token);
-            setIsAdmin(role === 'ADMIN');
-            setUser({
-              id: session.user.id,
-              email: session.user.email || '',
-              role: role,
-              fullName: session.user.user_metadata?.full_name || '',
-            });
-          } else if (event === 'SIGNED_OUT') {
-            clearAuthToken();
-            setTokenState(null);
-            setUser(null);
-            setIsAdmin(false);
-          }
-        });
-
-        return () => {
-          subscription.unsubscribe();
-        };
+      } catch {
+        // Backend returned 401 or token is invalid/expired -> strictly revoke session
+        clearAuthToken();
+        setTokenState(null);
+        setUser(null);
+        setIsAdmin(false);
       }
     } finally {
       setIsLoading(false);
@@ -142,10 +130,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   useEffect(() => {
-    let cleanup: (() => void) | undefined;
-    initAuth().then((c) => {
-      cleanup = c;
-    });
+    initAuth();
 
     const handleAuthChanged = () => {
       syncStateFromStorage();
@@ -153,23 +138,59 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     window.addEventListener('kh_auth_changed', handleAuthChanged);
     window.addEventListener('storage', handleAuthChanged);
 
+    const supabase = getSupabaseClient();
+    let sbSubscription: any = null;
+    if (supabase) {
+      const { data } = supabase.auth.onAuthStateChange((event) => {
+        if (event === 'SIGNED_OUT') {
+          clearAuthToken();
+          setTokenState(null);
+          setUser(null);
+          setIsAdmin(false);
+        }
+      });
+      sbSubscription = data?.subscription;
+    }
+
     return () => {
-      if (cleanup) cleanup();
       window.removeEventListener('kh_auth_changed', handleAuthChanged);
       window.removeEventListener('storage', handleAuthChanged);
+      if (sbSubscription) {
+        sbSubscription.unsubscribe();
+      }
     };
   }, [initAuth, syncStateFromStorage]);
 
   const login = (newToken: string, isUserAdmin: boolean = false, refreshToken?: string, userData?: any) => {
+    if (!newToken || typeof newToken !== 'string' || newToken.trim().length === 0) {
+      clearAuthToken();
+      setTokenState(null);
+      setUser(null);
+      setIsAdmin(false);
+      setIsLoading(false);
+      return;
+    }
     setAuthToken(newToken, isUserAdmin, refreshToken);
     setTokenState(newToken);
     setIsAdmin(isUserAdmin);
     if (userData) {
+      const isRoleAdmin = isUserAdmin || userData.role === 'ADMIN' || userData.role === 'SUPER_ADMIN';
+      const subExpiry = userData.subscription_expiry || userData.subscriptionExpiry;
+      const isExpired = !isRoleAdmin && !!subExpiry && new Date(subExpiry) < new Date();
+      const isRoleStaff = isRoleAdmin || ((userData.role === 'STAFF' || !!userData.is_staff || !!userData.isStaff) && !isExpired);
       setUser({
         id: userData.id || userData.user_id || '',
         email: userData.email || '',
-        role: isUserAdmin ? 'ADMIN' : 'USER',
-        fullName: userData.full_name || userData.fullName || '',
+        role: isRoleAdmin ? 'ADMIN' : (userData.role === 'STAFF' ? (isExpired ? 'USER' : 'STAFF') : 'USER'),
+        fullName: userData.full_name || userData.fullName || userData.user_metadata?.full_name || userData.user_metadata?.name || '',
+        mobileNumber: userData.mobile_number || userData.mobileNumber || userData.user_metadata?.mobile_number || userData.user_metadata?.phone || userData.phone || '',
+        gender: userData.gender || userData.user_metadata?.gender || '',
+        emailVerified: userData.email_verified,
+        isStaff: isRoleStaff,
+        isGold: isRoleAdmin || ((!!userData.is_gold || !!userData.isGold) && !isExpired),
+        staffSource: userData.staff_source || userData.staffSource,
+        subscriptionExpiry: subExpiry,
+        isExpired: isExpired,
       });
     }
     setIsLoading(false);
@@ -198,12 +219,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
+  const isStaffComputed = isAdmin || (!!user?.isStaff && !user?.isExpired) || (user?.role === 'STAFF' && !user?.isExpired);
+  const isGoldComputed = isAdmin || (!!user?.isGold && !user?.isExpired);
+  const isExpiredComputed = !isAdmin && !!user?.isExpired;
+
   return (
     <AuthContext.Provider
       value={{
         token,
         user,
         isAdmin,
+        isStaff: isStaffComputed,
+        isGold: isGoldComputed,
+        isExpired: isExpiredComputed,
         isAuthenticated: !!token,
         isLoading,
         login,

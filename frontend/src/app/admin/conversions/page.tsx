@@ -10,6 +10,7 @@ import { Card } from '@/components/ui/Card';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/Table';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { Modal } from '@/components/ui/Modal';
+import { AlertDialog } from '@/components/ui/AlertDialog';
 
 function AdminConversionsContent() {
   const searchParams = useSearchParams();
@@ -25,6 +26,15 @@ function AdminConversionsContent() {
   const [diagData, setDiagData] = useState<any>(null);
   const [diagLoading, setDiagLoading] = useState(false);
   const [isDiagOpen, setIsDiagOpen] = useState(false);
+  const [errorDialog, setErrorDialog] = useState<{
+    isOpen: boolean;
+    title: string;
+    message: string;
+  }>({
+    isOpen: false,
+    title: '',
+    message: '',
+  });
 
   useEffect(() => {
     getAdminConversions()
@@ -46,7 +56,11 @@ function AdminConversionsContent() {
       const data = await getConversionDiagnostics(jobId);
       setDiagData(data);
     } catch {
-      alert('Failed to load conversion diagnostics');
+      setErrorDialog({
+        isOpen: true,
+        title: 'Diagnostic Error',
+        message: 'Failed to load conversion diagnostics for this bank statement job.',
+      });
     } finally {
       setDiagLoading(false);
     }
@@ -419,6 +433,14 @@ function AdminConversionsContent() {
         )}
       </Modal>
 
+      <AlertDialog
+        isOpen={errorDialog.isOpen}
+        onClose={() => setErrorDialog((prev) => ({ ...prev, isOpen: false }))}
+        title={errorDialog.title}
+        message={errorDialog.message}
+        variant="error"
+        buttonText="Close"
+      />
     </div>
   );
 }

@@ -3,7 +3,19 @@
 import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { Search, Sparkles, Check, X, ShieldAlert, UserCheck, Shield, Users, Eye, Ban, RotateCcw, FileSpreadsheet, Mail, KeyRound, AlertTriangle, Calendar } from 'lucide-react';
-import { getAdminUsers, grantUserUnlimited, revokeUserUnlimited, getAdminUserDetails, toggleUserSuspension, updateUserAccountStatus, resetUserDailyUsage, updateUserQuota, apiFetch } from '@/lib/api';
+import { 
+  getAdminUsers, 
+  grantUserUnlimited, 
+  revokeUserUnlimited, 
+  getAdminUserDetails, 
+  toggleUserSuspension, 
+  updateUserAccountStatus, 
+  resetUserDailyUsage, 
+  updateUserQuota, 
+  getAdminUserActivity,
+  UserActivityLog,
+  apiFetch 
+} from '@/lib/api';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
@@ -26,6 +38,7 @@ export default function AdminUsersPage() {
   const [quotaMode, setQuotaMode] = useState<'GLOBAL' | 'CUSTOM'>('GLOBAL');
   const [customQuotaValue, setCustomQuotaValue] = useState<number>(50);
   const [savingQuota, setSavingQuota] = useState(false);
+  const [userActivities, setUserActivities] = useState<UserActivityLog[]>([]);
 
   // Suspend Account Modal State
   const [isSuspendModalOpen, setIsSuspendModalOpen] = useState(false);
@@ -155,7 +168,10 @@ export default function AdminUsersPage() {
       const details = await getAdminUserDetails(userId);
       setSelectedUser(details);
       setQuotaMode(details.quota_mode === 'CUSTOM' ? 'CUSTOM' : 'GLOBAL');
-      setCustomQuotaValue(details.custom_daily_limit || (typeof details.daily_limit === 'number' ? details.daily_limit : 50));
+      setCustomQuotaValue(details.custom_daily_limit || (typeof details.daily_limit === 'number' ? details.daily_limit : 5));
+      getAdminUserActivity(userId)
+        .then((res) => setUserActivities(res.activities || []))
+        .catch(() => setUserActivities([]));
     } catch {
       setErrorMsg('Failed to load user details.');
     } finally {
@@ -300,7 +316,7 @@ export default function AdminUsersPage() {
                         {u.email}
                       </div>
                       <div className="font-mono text-slate-400 text-[11px]">
-                        {u.mobile_number || 'Mobile not set'}
+                        {u.mobile_number || 'Mobile not set'}{u.gender && u.gender !== 'Not specified' ? ` • ${u.gender}` : ''}
                       </div>
                     </TableCell>
                     <TableCell>
@@ -340,11 +356,11 @@ export default function AdminUsersPage() {
                       ) : u.quota_mode === 'CUSTOM' ? (
                         <span className="text-brand-700 font-bold text-xs flex items-center justify-center gap-1">
                           <span className="w-1.5 h-1.5 rounded-full bg-brand-600" />
-                          {u.daily_limit} Pgs / Day (Custom)
+                          {u.daily_limit} Bills / Day (Custom)
                         </span>
                       ) : (
                         <span className="text-slate-600 font-medium text-xs">
-                          {u.daily_limit || 50} Pgs / Day
+                          {u.daily_limit || 5} Bills / Day
                         </span>
                       )}
                     </TableCell>
@@ -431,6 +447,9 @@ export default function AdminUsersPage() {
                   <div className="text-xs text-slate-600 font-mono mt-0.5 break-all">{selectedUser.email}</div>
                   {selectedUser.mobile_number && (
                     <div className="text-xs text-slate-500 font-mono mt-0.5">Mobile: {selectedUser.mobile_number}</div>
+                  )}
+                  {selectedUser.gender && selectedUser.gender !== 'Not specified' && (
+                    <div className="text-xs text-slate-500 font-mono mt-0.5">Gender: <span className="font-semibold text-slate-700">{selectedUser.gender}</span></div>
                   )}
                   <div className="text-[11px] text-slate-400 font-mono mt-1">
                     Account ID: {selectedUser.id}
@@ -557,12 +576,12 @@ export default function AdminUsersPage() {
               </div>
             </div>
 
-            {/* Daily Free Page Quota Management (PRD Sections 20 & 21) */}
+            {/* Daily Free Bill Quota Management */}
             <div className="p-5 bg-gradient-to-br from-slate-50 to-white rounded-2xl border border-slate-200 shadow-sm space-y-4">
               <div className="flex items-center justify-between">
                 <div>
                   <h4 className="text-sm font-bold tracking-tight text-navy-900">
-                    Daily Free Page Quota Control
+                    Daily Free Bill Quota Control
                   </h4>
                   <p className="text-[11px] text-slate-500 mt-1">
                     Configure whether this user operates on the Global Free Daily Quota or an individual override
@@ -586,7 +605,7 @@ export default function AdminUsersPage() {
                         onChange={() => setQuotaMode('GLOBAL')}
                         className="text-brand-600 focus:ring-brand-500 w-4 h-4"
                       />
-                      <span className="text-sm font-medium text-slate-800">Use Global Free Quota <span className="text-slate-500 font-normal">({selectedUser.global_daily_limit || 50} pgs/day)</span></span>
+                      <span className="text-sm font-medium text-slate-800">Use Global Free Quota <span className="text-slate-500 font-normal">({selectedUser.global_daily_limit || 5} bills/day)</span></span>
                     </label>
 
                     <label className={`flex items-center gap-3 p-3 rounded-xl border cursor-pointer transition-all ${quotaMode === 'CUSTOM' ? 'border-brand-500 bg-brand-50/50 shadow-sm' : 'border-slate-200 hover:border-brand-300'}`}>
@@ -606,7 +625,7 @@ export default function AdminUsersPage() {
                 {quotaMode === 'CUSTOM' && (
                   <div className="space-y-2 animate-fadeIn">
                     <label className="text-xs font-semibold text-slate-700 block uppercase tracking-wider">
-                      Custom Daily Pages Allowance
+                      Custom Daily Bills Allowance
                     </label>
                     <div className="flex items-center gap-2 mt-2">
                       <input
@@ -782,6 +801,60 @@ export default function AdminUsersPage() {
                 </div>
               )}
             </div>
+
+            {/* User Activity Timeline (PRD Section 8 Requirement) */}
+            <div className="space-y-3 pt-4 border-t border-slate-200">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h4 className="text-sm font-bold tracking-tight text-navy-900">
+                    User Activity Audit Trail ({userActivities.length})
+                  </h4>
+                  <p className="text-[11px] text-slate-500">
+                    Traceability of user actions across Web and PWA
+                  </p>
+                </div>
+                <Badge variant="purple" size="sm">
+                  Live Audit Log
+                </Badge>
+              </div>
+
+              {userActivities.length === 0 ? (
+                <div className="p-5 bg-slate-50 border border-slate-200 rounded-xl text-center text-xs text-slate-500">
+                  No recorded activity log entries for this user yet.
+                </div>
+              ) : (
+                <div className="space-y-2 max-h-56 overflow-y-auto pr-1">
+                  {userActivities.map((act) => (
+                    <div
+                      key={act.id}
+                      className="p-3 bg-slate-50 rounded-xl border border-slate-200 flex items-start justify-between gap-3 text-xs"
+                    >
+                      <div className="space-y-0.5">
+                        <div className="flex items-center gap-2">
+                          <span className="font-bold text-slate-900 font-mono">{act.action}</span>
+                          <Badge variant={act.status === 'SUCCESS' ? 'success' : 'danger'} size="sm">
+                            {act.status}
+                          </Badge>
+                        </div>
+                        <p className="text-[11px] text-slate-500">
+                          Module: <span className="font-medium text-slate-700">{act.module || 'Platform'}</span>
+                          {act.ip_address ? ` • IP: ${act.ip_address}` : ''}
+                        </p>
+                      </div>
+                      <span className="text-[10px] text-slate-400 font-mono shrink-0">
+                        {new Date(act.created_at).toLocaleString('en-IN', {
+                          day: '2-digit',
+                          month: 'short',
+                          hour: '2-digit',
+                          minute: '2-digit'
+                        })}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
           </div>
         )}
       </Modal>

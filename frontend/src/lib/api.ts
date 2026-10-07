@@ -1,3 +1,5 @@
+import { getDeviceId } from './fingerprint';
+
 export interface PublicSettings {
   site_name: string;
   site_mode: 'FREE' | 'PAID';
@@ -23,6 +25,11 @@ export interface UsageInfo {
   pages_used_today: number;
   pages_remaining_today: number;
   additional_page_balance?: number;
+  bills_used_today?: number;
+  bills_remaining_today?: number;
+  free_daily_bill_limit?: number;
+  additional_bill_balance?: number;
+  price_per_bill?: number;
   total_allowed_pages?: number;
   price_per_page?: number;
   is_unlimited: boolean;
@@ -44,6 +51,9 @@ export interface PaymentConfig {
   qr_path: string;
   whatsapp_number: string;
   support_message: string;
+  razorpay_key_id?: string;
+  razorpay_configured?: boolean;
+  is_test_mode?: boolean;
 }
 
 export interface PaymentRequest {
@@ -367,14 +377,18 @@ export async function verifyAdmin(): Promise<{ status: string; is_admin: boolean
 }
 
 export async function userLogin(email: string, password: string): Promise<{ token: string; refresh_token?: string; user: any }> {
+  // Clear any existing stale or mock tokens before attempting login
+  clearAuthToken();
+
   const res = await fetch(`${API_BASE}/auth/login`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ email: email.trim(), password }),
   });
   if (!res.ok) {
+    clearAuthToken();
     let errData: any = {};
-    let errorDetail = 'Authentication failed';
+    let errorDetail = 'Invalid credentials / Login failed. Please check your email and password.';
     try {
       errData = await res.json();
       errorDetail = typeof errData.detail === 'string' ? errData.detail : (errData.detail?.message || errData.message || errorDetail);
@@ -392,20 +406,28 @@ export async function userLogin(email: string, password: string): Promise<{ toke
     throw err;
   }
   const data = await res.json();
-  if (data.token) {
-    setAuthToken(data.token, data.user?.role === 'ADMIN', data.refresh_token);
+  if (!data || !data.token || typeof data.token !== 'string' || data.token.trim().length === 0) {
+    clearAuthToken();
+    const err: any = new Error('Invalid credentials / Login failed: No valid authorization token received.');
+    err.status = 401;
+    throw err;
   }
+  setAuthToken(data.token, data.user?.role === 'ADMIN', data.refresh_token);
   return data;
 }
 
 export async function adminLogin(email: string, password: string): Promise<{ token: string; is_admin: boolean; user: any }> {
+  // Clear any existing stale or mock tokens before attempting admin login
+  clearAuthToken();
+
   const res = await fetch(`${API_BASE}/system/admin-login`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ email: email.trim(), password }),
   });
   if (!res.ok) {
-    let errorDetail = 'Authentication failed';
+    clearAuthToken();
+    let errorDetail = 'Invalid credentials / Login failed: Access denied. This portal is restricted to authorized administrators.';
     try {
       const err = await res.json();
       errorDetail = typeof err.detail === 'string' ? err.detail : (err.detail?.message || err.message || errorDetail);
@@ -414,7 +436,15 @@ export async function adminLogin(email: string, password: string): Promise<{ tok
     err.status = res.status;
     throw err;
   }
-  return res.json();
+  const data = await res.json();
+  if (!data || !data.token || !data.is_admin) {
+    clearAuthToken();
+    const err: any = new Error('Invalid credentials / Login failed: Unauthorized administrator credentials.');
+    err.status = 401;
+    throw err;
+  }
+  setAuthToken(data.token, true);
+  return data;
 }
 
 export async function adminForgotPassword(email: string): Promise<{ success: boolean; message: string; recovery_email: string }> {
@@ -561,6 +591,14 @@ export async function apiFetch<T>(endpoint: string, options: RequestInit = {}): 
   if (!headers.has('Authorization') && token) {
     headers.set('Authorization', `Bearer ${token}`);
   }
+  if (!headers.has('X-Device-Id')) {
+    try {
+      const devId = getDeviceId();
+      if (devId) {
+        headers.set('X-Device-Id', devId);
+      }
+    } catch {}
+  }
 
   let res = await fetch(`${API_BASE}${endpoint}`, {
     ...options,
@@ -647,16 +685,47 @@ export async function apiFetch<T>(endpoint: string, options: RequestInit = {}): 
 }
 
 // Client API Methods
+let cachedPublicSettings: PublicSettings | null = null;
+let cachedPublicSettingsTimestamp = 0;
+
 export async function getPublicSettings(): Promise<PublicSettings> {
-  return apiFetch<PublicSettings>('/system/public-settings');
+  const now = Date.now();
+  if (cachedPublicSettings && (now - cachedPublicSettingsTimestamp < 60000)) {
+    return cachedPublicSettings;
+  }
+  const data = await apiFetch<PublicSettings>('/system/public-settings');
+  cachedPublicSettings = data;
+  cachedPublicSettingsTimestamp = now;
+  return data;
 }
 
 export async function getSupportedBanks(): Promise<BankInfo[]> {
   return apiFetch<BankInfo[]>('/banks');
 }
 
+let cachedUsage: UsageInfo | null = null;
+let cachedUsageTimestamp = 0;
+let usageFetchPromise: Promise<UsageInfo> | null = null;
+
 export async function getUserUsage(): Promise<UsageInfo> {
-  return apiFetch<UsageInfo>('/usage');
+  const now = Date.now();
+  if (cachedUsage && (now - cachedUsageTimestamp < 4000)) {
+    return cachedUsage;
+  }
+  if (usageFetchPromise) {
+    return usageFetchPromise;
+  }
+  usageFetchPromise = (async () => {
+    try {
+      const data = await apiFetch<UsageInfo>('/usage');
+      cachedUsage = data;
+      cachedUsageTimestamp = Date.now();
+      return data;
+    } finally {
+      usageFetchPromise = null;
+    }
+  })();
+  return usageFetchPromise;
 }
 
 export async function uploadStatementPdf(
@@ -907,14 +976,24 @@ export async function importLedgers(file: File): Promise<LedgerImportResult> {
   const formData = new FormData();
   formData.append('file', file);
   const token = getAuthToken();
+  const headers: Record<string, string> = {};
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
   const res = await fetch(`${API_BASE}/ledgers/import`, {
     method: 'POST',
-    headers: { Authorization: `Bearer ${token}` },
+    headers,
     body: formData,
   });
   if (!res.ok) {
-    const err = await res.json().catch(() => ({ detail: 'Failed to import ledgers' }));
-    throw new Error(err.detail || 'Failed to import ledgers');
+    let errDetail = 'Failed to import ledgers';
+    try {
+      const err = await res.json();
+      errDetail = err.detail || err.message || errDetail;
+    } catch {}
+    const error: any = new Error(errDetail);
+    error.status = res.status;
+    throw error;
   }
   return res.json();
 }
@@ -940,6 +1019,19 @@ export async function addSingleLedger(name: string, group: string = 'Primary'): 
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ name, group }),
+  });
+}
+
+export async function createLedger(data: {
+  name: string;
+  group?: string;
+  party_gstin?: string;
+  state?: string;
+}): Promise<ImportedLedger> {
+  return apiFetch<ImportedLedger>('/ledgers', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
   });
 }
 
@@ -1286,18 +1378,107 @@ export async function updateSection129Settings(data: any): Promise<any> {
 // ---------------------------------------------------------------------------
 // Email Uniqueness & Duplicate Signup Checks
 // ---------------------------------------------------------------------------
-export async function checkEmailStatus(email: string): Promise<{ exists: boolean; verified: boolean; message?: string }> {
+export async function checkEmailStatus(email: string, mobileNumber?: string): Promise<{ exists: boolean; verified: boolean; message?: string; pending_active?: boolean; same_mobile?: boolean; remaining_seconds?: number }> {
   try {
     const res = await fetch(`${API_BASE}/auth/check-email`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email: email.trim() }),
+      body: JSON.stringify({ email: email.trim(), mobile_number: mobileNumber?.trim() }),
     });
     if (res.ok) {
       return res.json();
     }
   } catch {}
   return { exists: false, verified: false };
+}
+
+export interface PendingStatusResponse {
+  active: boolean;
+  email?: string;
+  mobile_number?: string;
+  full_name?: string;
+  masked_email?: string;
+  remaining_seconds: number;
+  expires_at?: number;
+  reason?: string;
+}
+
+export interface SupabaseSignupResponse {
+  success: boolean;
+  status: 'OTP_SENT' | 'PENDING_OTP_ACTIVE';
+  message: string;
+  email: string;
+  mobile_number: string;
+  masked_email: string;
+  remaining_seconds: number;
+  expires_at: number;
+}
+
+export async function initiateSupabaseSignup(data: {
+  email: string;
+  mobile_number: string;
+  full_name: string;
+  gender?: string;
+  password: string;
+}): Promise<SupabaseSignupResponse> {
+  const res = await fetch(`${API_BASE}/auth/signup/supabase-initiate`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || err.message || 'Failed to initiate signup verification.');
+  }
+  return res.json();
+}
+
+export async function getSignupPendingStatus(
+  email: string,
+  mobileNumber?: string
+): Promise<PendingStatusResponse> {
+  try {
+    const q = new URLSearchParams({ email: email.trim() });
+    if (mobileNumber) q.append('mobile_number', mobileNumber.trim());
+    const res = await fetch(`${API_BASE}/auth/signup/pending-status?${q.toString()}`);
+    if (res.ok) {
+      return res.json();
+    }
+  } catch {}
+  return { active: false, remaining_seconds: 0 };
+}
+
+export async function verifySupabaseEmailOtp(data: {
+  email: string;
+  otp: string;
+  mobile_number?: string;
+}): Promise<{ success: boolean; message: string; token: string; refresh_token: string; user: any }> {
+  const res = await fetch(`${API_BASE}/auth/signup/verify-email-otp`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || err.message || 'Verification code is incorrect or expired.');
+  }
+  return res.json();
+}
+
+export async function resendSupabaseEmailOtp(data: {
+  email: string;
+  mobile_number?: string;
+}): Promise<{ success: boolean; message: string; remaining_seconds: number; expires_at: number; cooldown_seconds: number }> {
+  const res = await fetch(`${API_BASE}/auth/signup/resend-email-otp`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || err.message || 'Unable to resend verification code right now.');
+  }
+  return res.json();
 }
 
 // ---------------------------------------------------------------------------
@@ -1616,7 +1797,935 @@ export async function getMyPaymentRequests(): Promise<PaymentRequest[]> {
   }
 }
 
+// ==========================================
+// INVOICES (SALES & PURCHASE JPG/PDF TO TALLY XML)
+// ==========================================
 
+export interface InvoiceItem {
+  id?: string;
+  item_index?: number;
+  serial?: string;
+  description: string;
+  item_name: string;
+  hsn_sac: string;
+  quantity: number;
+  invoice_qty?: number;
+  pack_multiplier?: number;
+  effective_qty?: number;
+  shipped_qty?: number;
+  billed_qty?: number;
+  uom: string;
+  invoice_uom?: string;
+  tally_uom?: string;
+  rate: number;
+  discount: number;
+  discount_pct?: number;
+  discount_amount?: number;
+  taxable_amount: number;
+  gst_rate?: number;
+  cgst_rate: number;
+  cgst_amount: number;
+  sgst_rate: number;
+  sgst_amount: number;
+  igst_rate: number;
+  igst_amount: number;
+  cess_rate: number;
+  cess_amount: number;
+  total_amount: number;
+  confidence?: number;
+  confidence_level?: 'HIGH' | 'MEDIUM' | 'LOW';
+  matched_stock_item?: string;
+  requires_item_creation?: boolean;
+  is_description_wrapped?: boolean;
+  tax_mode?: 'exclusive' | 'inclusive' | 'unknown';
+  is_tax_inclusive?: boolean;
+  raw_row_text?: string;
+  mrp?: number;
+  pack_size?: string;
+  item_size?: string;
+  free_qty?: number;
+  secondary_quantity?: number;
+  secondary_unit?: string;
+  gross_amount?: number;
+  unit_source?: string;
+  printed_rate?: number;
+  printed_taxable?: number;
+  validation_errors?: string[];
+  source_text?: string;
+  mapping_confidence?: 'HIGH' | 'MEDIUM' | 'LOW' | 'UNMATCHED';
+  mapping_status?: 'AUTO_MAPPED' | 'PLEASE_CHECK' | 'POSSIBLE_MATCH' | 'UNMATCHED' | 'NEW_ITEM' | 'VERIFIED';
+  match_suggestions?: Array<{
+    name: string;
+    similarity_score: number;
+    confidence: string;
+    hsn_code?: string;
+    base_units?: string;
+  }>;
+  quantity_option_a?: number;
+  uom_option_a?: string;
+  rate_option_a?: number;
+  quantity_option_b?: number;
+  uom_option_b?: string;
+  rate_option_b?: number;
+  selected_qty_option?: 'A' | 'B';
+  has_dual_qty?: boolean;
+  alternate_quantity?: number;
+  alternate_uom?: string;
+  needs_review?: boolean;
+  review_reason?: string;
+  is_reconstructed?: boolean;
+  math_check_passed?: boolean;
+  rate_source?: string;
+  gst_rate_source?: string;
+  can_convert_to_pieces?: boolean;
+  pack_size_multiplier?: number;
+  is_converted_to_pieces?: boolean;
+  discount_pattern?: string;
+  is_free_item?: boolean;
+}
 
+export interface PartyInfo {
+  name: string;
+  gstin: string;
+  address?: string;
+  state?: string;
+  state_code?: string;
+  phone?: string;
+  email?: string;
+  pan?: string;
+  role_evidence?: string;
+  source_text?: string;
+  repaired_gstin?: string;
+  matched_ledger_name?: string;
+  ledger_type?: string;
+  auto_create?: boolean;
+  requires_ledger_creation?: boolean;
+  mapping_confidence?: 'HIGH' | 'MEDIUM' | 'LOW' | 'UNMATCHED';
+  mapping_status?: 'AUTO_MAPPED' | 'PLEASE_CHECK' | 'POSSIBLE_MATCH' | 'UNMATCHED' | 'NEW_LEDGER' | 'VERIFIED';
+  match_suggestions?: Array<{
+    name: string;
+    similarity_score: number;
+    confidence: string;
+    party_gstin?: string;
+    group?: string;
+  }>;
+}
 
+export interface DetectedGstinCandidate {
+  gstin: string;
+  suggested_role: string;
+  location: string;
+  confidence: number;
+}
 
+export interface InvoiceValidationViolation {
+  rule_id: string;
+  field_path: string;
+  expected?: string | null;
+  actual?: string | null;
+  severity: 'ERROR' | 'WARN';
+  message: string;
+}
+
+export interface InvoiceDocument {
+  id: string;
+  source_file?: string;
+  source_filename?: string;
+  page_number?: number;
+  page_numbers?: number[];
+  doc_type?: string;
+  doc_type_evidence?: string;
+  invoice_type: 'PURCHASE' | 'SALES';
+  type_confidence?: number | string;
+  type_rationale?: string;
+  is_type_manual_override?: boolean;
+  own_company_name?: string;
+  own_gstin?: string;
+  own_state?: string;
+  invoice_number: string;
+  bill_number?: string;
+  invoice_date: string;
+  due_date?: string;
+  po_number?: string;
+  eway_bill_number?: string;
+  irn?: string;
+  tax_mode?: 'exclusive' | 'inclusive' | 'unknown';
+  tax_mode_evidence?: string;
+  supplier: PartyInfo;
+  buyer: PartyInfo;
+  detected_gstins?: DetectedGstinCandidate[];
+  gstin_role_needs_review?: boolean;
+  place_of_supply?: string;
+  reverse_charge?: boolean;
+  items: InvoiceItem[];
+  table_columns?: Array<Record<string, any>>;
+  page_notes?: string[];
+  items_detected_count?: number;
+  item_count_reconciliation_note?: string;
+  taxable_total: number;
+  cgst_total: number;
+  sgst_total: number;
+  igst_total: number;
+  cess_total: number;
+  discount_total?: number;
+  other_charges?: number;
+  round_off: number;
+  grand_total: number;
+  calculated_total: number;
+  discrepancy: number;
+  is_balanced: boolean;
+  totals?: Record<string, any>;
+  field_confidences?: Record<string, number>;
+  low_confidence_fields?: string[];
+  duplicate_warning?: string | null;
+  overall_confidence: number;
+  validation_warnings?: string[];
+  validation_violations?: InvoiceValidationViolation[];
+  errors?: string[];
+  warnings?: string[];
+  is_valid?: boolean;
+  has_page_continuation?: boolean;
+  continuation_note?: string;
+  narration?: string;
+  amount_in_words?: string;
+  reconciliation_passed?: boolean;
+  reconciliation_flags?: string[];
+  needs_review?: boolean;
+  ai_extracted?: boolean;
+  ai_model_used?: string;
+  ai_status_message?: string;
+  discount_pattern?: string;
+  discount_pattern_note?: string;
+  post_tax_discount?: number;
+  pack_quantity_option?: 'pieces' | 'bulk';
+}
+
+export interface LedgerMappingConfig {
+  purchase_ledger: string;
+  sales_ledger: string;
+  cgst_ledger: string;
+  sgst_ledger: string;
+  igst_ledger: string;
+  cess_ledger: string;
+  round_off_ledger: string;
+  other_charges_ledger?: string;
+  discount_ledger?: string;
+}
+
+export interface FinalInvoiceSnapshot {
+  invoices: InvoiceDocument[];
+  ledger_mapping: LedgerMappingConfig;
+  auto_create_items: boolean;
+  auto_create_parties: boolean;
+}
+
+export interface InvoiceBatchSummary {
+  total_documents: number;
+  purchase_count?: number;
+  sales_count?: number;
+  total_purchase_invoices?: number;
+  total_sales_invoices?: number;
+  total_taxable?: number;
+  total_taxable_value?: number;
+  total_cgst?: number;
+  total_sgst?: number;
+  total_igst?: number;
+  total_cess?: number;
+  total_grand?: number;
+  total_invoice_value?: number;
+  missing_masters_count?: number;
+  items_requiring_creation_count?: number;
+  parties_requiring_creation_count?: number;
+  has_discrepancies?: boolean;
+}
+
+export interface InvoiceBatchResult {
+  job_id: string;
+  invoices: InvoiceDocument[];
+  summary: InvoiceBatchSummary;
+  ledger_mapping: LedgerMappingConfig;
+}
+
+export interface InvoiceXmlGenerationResult {
+  success: boolean;
+  filename: string;
+  is_valid: boolean;
+  validation_errors: string[];
+  xml_content: string;
+  summary: InvoiceBatchSummary;
+}
+
+export async function getInvoiceConfig(): Promise<{
+  default_ledger_mapping: LedgerMappingConfig;
+  supported_file_types: string[];
+  max_upload_size_mb: number;
+}> {
+  return apiFetch('/invoices/config');
+}
+
+export async function uploadInvoices(
+  files: File[],
+  defaultInvoiceType: 'AUTO' | 'PURCHASE' | 'SALES' = 'AUTO'
+): Promise<InvoiceBatchResult> {
+  const formData = new FormData();
+  files.forEach((f) => formData.append('files', f));
+  formData.append('default_invoice_type', defaultInvoiceType);
+
+  const token = getAuthToken();
+  const headers: Record<string, string> = {};
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
+
+  const res = await fetch(`${API_BASE}/invoices/upload`, {
+    method: 'POST',
+    headers,
+    body: formData,
+  });
+
+  if (!res.ok) {
+    let errDetail = 'Failed to process invoice files';
+    try {
+      const err = await res.json();
+      errDetail = err.detail || err.message || errDetail;
+    } catch {}
+    const error: any = new Error(errDetail);
+    error.status = res.status;
+    throw error;
+  }
+  return res.json();
+}
+
+export async function validateInvoices(
+  snapshot: FinalInvoiceSnapshot
+): Promise<InvoiceBatchResult> {
+  return apiFetch<InvoiceBatchResult>('/invoices/validate', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(snapshot),
+  });
+}
+
+export async function generateInvoiceXml(
+  snapshot: FinalInvoiceSnapshot
+): Promise<InvoiceXmlGenerationResult> {
+  return apiFetch<InvoiceXmlGenerationResult>('/invoices/generate-xml', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(snapshot),
+  });
+}
+
+export async function downloadInvoiceXml(
+  snapshot: FinalInvoiceSnapshot
+): Promise<{ blob: Blob; filename: string }> {
+  const token = getAuthToken();
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+  };
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
+
+  const res = await fetch(`${API_BASE}/invoices/download-xml`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify(snapshot),
+  });
+
+  if (!res.ok) {
+    let errDetail = 'Failed to download Tally XML';
+    try {
+      const err = await res.json();
+      errDetail = err.detail || err.message || errDetail;
+    } catch {}
+    const error: any = new Error(errDetail);
+    error.status = res.status;
+    throw error;
+  }
+
+  const cd = res.headers.get('Content-Disposition') || '';
+  let filename = 'KangraHub_Invoices_Tally.xml';
+  const match = cd.match(/filename="?([^";]+)"?/);
+  if (match && match[1]) {
+    filename = match[1];
+  }
+
+  const blob = await res.blob();
+  return { blob, filename };
+}
+
+// ==========================================
+// STOCK ITEMS (TALLY STOCK MASTERS IMPORT & MATCHING)
+// ==========================================
+
+export interface ImportedStockItem {
+  name: string;
+  normalized_name: string;
+  parent?: string;
+  base_units: string;
+  additional_units?: string;
+  hsn_code?: string;
+  gst_rate?: number;
+  gst_type_of_supply?: string;
+  description?: string;
+  guid?: string;
+  source_format?: string;
+}
+
+export interface StockItemImportResult {
+  detected_format: string;
+  total_imported: number;
+  items: ImportedStockItem[];
+  duplicates: number;
+  conflicts: string[];
+  error?: string;
+}
+
+export interface StockItemMatchSuggestion {
+  invoice_item_name: string;
+  matched_stock_item?: ImportedStockItem;
+  similarity_score: number;
+  match_type: string;
+  confidence: 'HIGH' | 'MEDIUM' | 'LOW';
+}
+
+export async function importStockItems(file: File): Promise<StockItemImportResult> {
+  const formData = new FormData();
+  formData.append('file', file);
+  const token = getAuthToken();
+  const headers: Record<string, string> = {};
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
+
+  const res = await fetch(`${API_BASE}/stock-items/import`, {
+    method: 'POST',
+    headers,
+    body: formData,
+  });
+
+  if (!res.ok) {
+    let errDetail = 'Failed to import stock items file.';
+    try {
+      const err = await res.json();
+      errDetail = err.detail || err.message || errDetail;
+    } catch {}
+    const error: any = new Error(errDetail);
+    error.status = res.status;
+    throw error;
+  }
+  return res.json();
+}
+
+export async function listStockItems(search?: string, limit: number = 50): Promise<ImportedStockItem[]> {
+  const params = new URLSearchParams();
+  if (search) params.append('search', search);
+  params.append('limit', limit.toString());
+  return apiFetch<ImportedStockItem[]>(`/stock-items?${params.toString()}`);
+}
+
+export async function matchStockItemsBatch(
+  items: Array<{ name: string; hsn?: string }>
+): Promise<StockItemMatchSuggestion[]> {
+  return apiFetch<StockItemMatchSuggestion[]>('/stock-items/match', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ items }),
+  });
+}
+
+export async function createNewStockItem(data: {
+  name: string;
+  hsn?: string;
+  uom?: string;
+  parent_group?: string;
+  gst_rate?: number;
+}): Promise<{ success: boolean; item: ImportedStockItem; xml_snippet: string }> {
+  return apiFetch('/stock-items/create', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  });
+}
+
+// ==========================================
+// USER PROFILE & REVIEWS
+// ==========================================
+
+export interface UserProfileData {
+  id: string;
+  email: string;
+  full_name: string;
+  mobile_number?: string;
+  gender?: string;
+  role: string;
+  is_unlimited: boolean;
+  is_staff?: boolean;
+  is_gold?: boolean;
+  staff_source?: string;
+  subscription_expiry?: string;
+  account_status?: string;
+  email_verified?: boolean;
+  created_at?: string;
+}
+
+export interface ReviewItem {
+  id: string;
+  user_id?: string;
+  user_name: string;
+  user_email?: string;
+  masked_email?: string;
+  rating: number;
+  review_text?: string;
+  moderation_status?: string;
+  created_at: string;
+}
+
+export interface PublicReviewsResponse {
+  average_rating: number;
+  total_reviews: number;
+  stars_breakdown: Record<string, number>;
+  reviews: ReviewItem[];
+}
+
+export async function getUserProfile(): Promise<UserProfileData> {
+  return apiFetch<UserProfileData>('/auth/me');
+}
+
+export async function updateUserProfile(payload: {
+  full_name?: string;
+  mobile_number?: string;
+  gender?: string;
+}): Promise<{ success: boolean; message: string; user: UserProfileData }> {
+  return apiFetch('/auth/profile', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function submitReview(payload: {
+  rating: number;
+  review_text?: string;
+}): Promise<{ success: boolean; message: string; review_id: string; rating: number }> {
+  return apiFetch('/reviews', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function getMyReview(): Promise<{ has_review: boolean; review: ReviewItem | null }> {
+  return apiFetch('/reviews/my');
+}
+
+export async function getPublicReviews(limit: number = 20): Promise<PublicReviewsResponse> {
+  return apiFetch<PublicReviewsResponse>(`/reviews/public?limit=${limit}`);
+}
+
+// ==========================================
+// MAIN WEBSITE ADMIN DASHBOARD APIS
+// ==========================================
+
+export interface WebsiteAdminUser {
+  id: string;
+  email: string;
+  full_name: string;
+  mobile_number: string;
+  gender: string;
+  role: string;
+  is_unlimited: boolean;
+  account_status: string;
+  email_verified: boolean;
+  mobile_verified: boolean;
+  registration_date: string;
+  last_login?: string;
+  total_conversions: number;
+}
+
+export interface UserActivityLog {
+  id: string;
+  user_id: string;
+  user_email: string;
+  action: string;
+  module: string;
+  resource_id?: string;
+  status: string;
+  metadata?: any;
+  ip_address?: string;
+  user_agent?: string;
+  created_at: string;
+}
+
+export interface SecurityAuditLog {
+  id: string;
+  actor_id?: string;
+  actor_email?: string;
+  event_type: string;
+  severity: string;
+  module?: string;
+  details?: any;
+  ip_address?: string;
+  created_at: string;
+}
+
+export interface AdminSystemNotification {
+  id: string;
+  type: string;
+  title: string;
+  message: string;
+  severity: string;
+  is_read: number;
+  related_user_id?: string;
+  created_at: string;
+}
+
+export async function getAdminWebsiteUsers(search?: string, status?: string): Promise<{ users: WebsiteAdminUser[]; total: number }> {
+  const params = new URLSearchParams();
+  if (search) params.append('search', search);
+  if (status) params.append('status', status);
+  return apiFetch(`/admin/website-users?${params.toString()}`);
+}
+
+export async function getAdminUserActivity(userId: string, limit: number = 50): Promise<{ user_id: string; user: any; activities: UserActivityLog[] }> {
+  return apiFetch(`/admin/users/${encodeURIComponent(userId)}/activity?limit=${limit}`);
+}
+
+export async function getAdminActivityLogs(params?: {
+  user_id?: string;
+  action?: string;
+  module?: string;
+  status?: string;
+  limit?: number;
+  offset?: number;
+}): Promise<{ logs: UserActivityLog[]; count: number }> {
+  const q = new URLSearchParams();
+  if (params?.user_id) q.append('user_id', params.user_id);
+  if (params?.action) q.append('action', params.action);
+  if (params?.module) q.append('module', params.module);
+  if (params?.status) q.append('status', params.status);
+  if (params?.limit) q.append('limit', params.limit.toString());
+  if (params?.offset) q.append('offset', params.offset.toString());
+  return apiFetch(`/admin/activity-logs?${q.toString()}`);
+}
+
+export async function getAdminSecurityLogs(params?: {
+  severity?: string;
+  limit?: number;
+  offset?: number;
+}): Promise<{ logs: SecurityAuditLog[]; count: number }> {
+  const q = new URLSearchParams();
+  if (params?.severity) q.append('severity', params.severity);
+  if (params?.limit) q.append('limit', params.limit.toString());
+  if (params?.offset) q.append('offset', params.offset.toString());
+  return apiFetch(`/admin/security-audit-logs?${q.toString()}`);
+}
+
+export async function getAdminReviews(status?: string, limit: number = 100): Promise<{ reviews: ReviewItem[]; total: number; average_rating: number }> {
+  const q = new URLSearchParams();
+  if (status) q.append('status', status);
+  q.append('limit', limit.toString());
+  return apiFetch(`/admin/reviews?${q.toString()}`);
+}
+
+export async function moderateReview(reviewId: string, status: string, notes?: string): Promise<{ success: boolean; message: string }> {
+  return apiFetch(`/admin/reviews/${encodeURIComponent(reviewId)}/moderate`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ status, notes }),
+  });
+}
+
+export async function getAdminSystemNotifications(unreadOnly: boolean = false, limit: number = 50): Promise<{ notifications: AdminSystemNotification[]; count: number }> {
+  return apiFetch(`/admin/system-notifications?unread_only=${unreadOnly}&limit=${limit}`);
+}
+
+export async function markAdminSystemNotificationRead(notifId: string): Promise<{ success: boolean; notification_id: string }> {
+  return apiFetch(`/admin/system-notifications/${encodeURIComponent(notifId)}/read`, {
+    method: 'POST',
+  });
+}
+
+// ==========================================
+// STAFF MANAGEMENT & ANTI-ABUSE APIs
+// ==========================================
+
+export interface StaffUserItem {
+  id: string;
+  email: string;
+  full_name: string;
+  role: string;
+  is_unlimited: boolean;
+  is_gold: boolean;
+  staff_source: string;
+  subscription_expiry?: string;
+  account_status: string;
+  registration_date?: string;
+}
+
+export interface StaffAuditLogItem {
+  id: string;
+  admin_id: string;
+  admin_name: string;
+  action: string;
+  target_user_id: string;
+  target_user_email: string;
+  details: string;
+  created_at: string;
+}
+
+export interface SuspiciousActivityItem {
+  type: string;
+  severity: string;
+  details: string;
+  timestamp: string;
+  device_id?: string;
+  accounts_count?: number;
+  bill_number?: string;
+  company_name?: string;
+}
+
+export async function getStaffList(): Promise<{ success: boolean; count: number; staff: StaffUserItem[] }> {
+  return apiFetch('/staff/list');
+}
+
+export async function addStaffMember(payload: {
+  user_id_or_email: string;
+  is_gold?: boolean;
+  expiry_days?: number;
+  notes?: string;
+}): Promise<{ success: boolean; message: string; role: string; is_gold: boolean }> {
+  return apiFetch('/staff/add', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function removeStaffMember(payload: {
+  user_id_or_email: string;
+  reason?: string;
+}): Promise<{ success: boolean; message: string }> {
+  return apiFetch('/staff/remove', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function toggleGoldTick(payload: {
+  user_id: string;
+  is_gold: boolean;
+}): Promise<{ success: boolean; message: string; is_gold: boolean }> {
+  return apiFetch('/staff/toggle-gold', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function extendStaffExpiry(payload: {
+  user_id: string;
+  days: number;
+}): Promise<{ success: boolean; message: string }> {
+  return apiFetch('/staff/extend-expiry', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function getStaffAuditLogs(limit: number = 50, offset: number = 0): Promise<{ success: boolean; logs: StaffAuditLogItem[] }> {
+  return apiFetch(`/staff/audit-logs?limit=${limit}&offset=${offset}`);
+}
+
+export async function getSuspiciousActivity(): Promise<{ success: boolean; signals: SuspiciousActivityItem[] }> {
+  return apiFetch('/staff/suspicious-activity');
+}
+
+export async function whitelistDevice(payload: {
+  device_id: string;
+  is_whitelisted: boolean;
+}): Promise<{ success: boolean; message: string }> {
+  return apiFetch('/staff/whitelist-device', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+}
+
+// ==========================================
+// SUBSCRIPTION & VERIFIED TIER APIs
+// ==========================================
+
+export interface UserSubscriptionItem {
+  id: string;
+  user_id: string;
+  user_email: string;
+  plan_name: string;
+  amount: number;
+  status: 'PENDING' | 'ACTIVE' | 'EXPIRED' | 'REJECTED';
+  payment_method: string;
+  txn_id?: string;
+  start_date?: string;
+  end_date?: string;
+  grace_until?: string;
+  created_at: string;
+  admin_notes?: string;
+}
+
+export interface StaffMembershipRecord {
+  id: string;
+  user_id: string;
+  user_email?: string;
+  staff_status: 'ACTIVE' | 'EXPIRED' | 'INACTIVE';
+  membership_started_at: string;
+  membership_expires_at: string;
+  last_valid_day: string;
+  display_wording: string;
+  is_gold?: number | boolean;
+  is_active?: boolean;
+}
+
+export interface RenewalHistoryItem {
+  id: string;
+  payment_id: string;
+  renewal_type: 'NEW' | 'EARLY_RENEWAL' | 'RENEWAL_AFTER_EXPIRY';
+  previous_expiry?: string;
+  new_expiry: string;
+  days_added: number;
+  created_at: string;
+}
+
+export interface StaffMembershipResponse {
+  success: boolean;
+  is_staff: boolean;
+  is_gold: boolean;
+  staff_status: 'ACTIVE' | 'EXPIRED' | 'INACTIVE';
+  staff_source?: string;
+  membership?: StaffMembershipRecord;
+  renewal_history?: RenewalHistoryItem[];
+  notification_alert?: {
+    milestone: string;
+    message: string;
+    is_new: boolean;
+  };
+  config?: {
+    price_inr: number;
+    price_paise: number;
+    duration_days: number;
+    payment_button_id: string;
+  };
+}
+
+export async function getMySubscription(): Promise<StaffMembershipResponse> {
+  return apiFetch('/subscriptions/my');
+}
+
+export async function verifyRazorpayPayment(payload: {
+  payment_id: string;
+  order_id?: string;
+  signature?: string;
+}): Promise<{
+  success: boolean;
+  idempotent?: boolean;
+  message: string;
+  renewal_type?: string;
+  membership_expires_at?: string;
+  display_wording?: string;
+  payment_id?: string;
+}> {
+  return apiFetch('/subscriptions/razorpay/verify', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function submitManualSubscription(formData: FormData): Promise<{
+  success: boolean;
+  subscription_id: string;
+  status: string;
+  message: string;
+}> {
+  return apiFetch('/subscriptions/manual-qr', {
+    method: 'POST',
+    body: formData,
+  });
+}
+
+export async function getAdminSubscriptions(): Promise<{
+  success: boolean;
+  count: number;
+  subscriptions: UserSubscriptionItem[];
+}> {
+  return apiFetch('/subscriptions/admin/list');
+}
+
+export async function approveSubscription(payload: {
+  subscription_id: string;
+  admin_notes?: string;
+}): Promise<{ success: boolean; message: string; end_date: string; grace_until: string }> {
+  return apiFetch('/subscriptions/admin/approve', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function rejectSubscription(payload: {
+  subscription_id: string;
+  admin_notes: string;
+}): Promise<{ success: boolean; message: string }> {
+  return apiFetch('/subscriptions/admin/reject', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+}
+
+export interface PaymentOrderResponse {
+  orderId: string;
+  amount: number;
+  currency: string;
+  keyId: string;
+}
+
+export interface CreatePaymentOrderPayload {
+  planId?: string;
+  customer_name?: string;
+  customer_email?: string;
+  customer_phone?: string;
+}
+
+export async function createPaymentOrder(payload?: CreatePaymentOrderPayload): Promise<PaymentOrderResponse> {
+  return apiFetch('/payments/create-order', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload || { planId: 'gold_monthly' }),
+  });
+}
+
+export async function verifyPayment(payload: {
+  razorpay_payment_id: string;
+  razorpay_order_id?: string;
+  razorpay_signature?: string;
+  customer_name?: string;
+  customer_email?: string;
+  customer_phone?: string;
+}): Promise<{
+  ok: boolean;
+  success: boolean;
+  message: string;
+  membership_expires_at?: string;
+  last_valid_day?: string;
+  display_wording?: string;
+  payment_id?: string;
+}> {
+  return apiFetch('/payments/verify', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+}
