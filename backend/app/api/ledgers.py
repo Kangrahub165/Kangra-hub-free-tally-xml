@@ -10,6 +10,12 @@ from app.accounting.ledger_importer import (
     ImportedGroup,
     LedgerImportResult
 )
+from app.accounting.tally_master_generator import (
+    LedgerDraft,
+    generate_ledger_master_xml,
+    verify_ledger_round_trip,
+    parse_ledger_master_xml
+)
 
 router = APIRouter(prefix="/ledgers", tags=["Ledgers"])
 
@@ -30,6 +36,18 @@ class AddLedgerRequest(BaseModel):
     group: Optional[str] = "Primary"
     party_gstin: Optional[str] = None
     state: Optional[str] = None
+
+class CreateLedgerMasterRequest(BaseModel):
+    name: str
+    alias: Optional[str] = None
+    parent_group: Optional[str] = "Sundry Creditors"
+    address_lines: Optional[List[str]] = []
+    state: Optional[str] = "Himachal Pradesh"
+    country: Optional[str] = "India"
+    pincode: Optional[str] = None
+    gstin: Optional[str] = None
+    pan: Optional[str] = None
+    registration_type: Optional[str] = "Regular"
 
 class BankConfigRequest(BaseModel):
     bank_name: str
@@ -134,6 +152,83 @@ async def add_single_ledger_endpoint(
         party_gstin=req.party_gstin,
         state=req.state
     )
+
+@router.post("/tally-preview")
+async def ledger_tally_preview_endpoint(req: CreateLedgerMasterRequest):
+    """
+    PRD Addendum 6: 'How it will look in Tally' preview for Ledgers.
+    Generates XML and parses directly from the XML snippet so the preview reflects what Tally gets.
+    """
+    if not req.name or not req.name.strip():
+        raise HTTPException(status_code=400, detail="Ledger name cannot be empty.")
+
+    try:
+        draft = LedgerDraft(
+            name=req.name.strip(),
+            alias=req.alias,
+            parent_group=req.parent_group or "Sundry Creditors",
+            address_lines=req.address_lines or [],
+            state=req.state or "Himachal Pradesh",
+            country=req.country or "India",
+            pincode=req.pincode,
+            gstin=req.gstin,
+            pan=req.pan,
+            registration_type=req.registration_type or "Regular"
+        )
+        xml_str = generate_ledger_master_xml(draft)
+        verify_ledger_round_trip(draft, xml_str)
+        preview = parse_ledger_master_xml(xml_str)
+        return {
+            "success": True,
+            "preview": preview,
+            "xml_snippet": xml_str
+        }
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@router.post("/create-master")
+async def create_ledger_master_endpoint(
+    request: Request,
+    req: CreateLedgerMasterRequest
+):
+    """
+    Creates a new party ledger, verifies round trip, and adds it to the user's ledger store.
+    """
+    if not req.name or not req.name.strip():
+        raise HTTPException(status_code=400, detail="Ledger name cannot be empty.")
+
+    user_id = resolve_user_id(request)
+    try:
+        draft = LedgerDraft(
+            name=req.name.strip(),
+            alias=req.alias,
+            parent_group=req.parent_group or "Sundry Creditors",
+            address_lines=req.address_lines or [],
+            state=req.state or "Himachal Pradesh",
+            country=req.country or "India",
+            pincode=req.pincode,
+            gstin=req.gstin,
+            pan=req.pan,
+            registration_type=req.registration_type or "Regular"
+        )
+        xml_str = generate_ledger_master_xml(draft)
+        verify_ledger_round_trip(draft, xml_str)
+
+        ledger = global_ledger_store.add_single_ledger(
+            user_id,
+            name=draft.name,
+            group=draft.parent_group,
+            party_gstin=draft.gstin,
+            state=draft.state
+        )
+
+        return {
+            "success": True,
+            "ledger": ledger,
+            "xml_snippet": xml_str
+        }
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 @router.delete("/{ledger_name}")
 async def delete_ledger_endpoint(

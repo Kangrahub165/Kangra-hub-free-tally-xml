@@ -1,0 +1,7 @@
+<TALLYMESSAGE xmlns:UDF="TallyUDF">
+ <STOCKGROUP NAME="Biscuits &amp; Snacks" RESERVEDNAME="" ACTION="Create">
+  <NAME>Biscuits &amp; Snacks</NAME>
+  <PARENT>Primary</PARENT>
+  <ISADDABLE>Yes</ISADDABLE>
+ </STOCKGROUP>
+</TALLYMESSAGE>

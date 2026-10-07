@@ -8,6 +8,13 @@ from pydantic import BaseModel, Field
 from difflib import SequenceMatcher
 
 from app.accounting.ledger_importer import sanitize_xml_content, decode_ledger_file
+from app.accounting.tally_master_generator import (
+    StockItemDraft,
+    generate_stock_item_master_xml,
+    verify_stock_item_round_trip,
+    generate_unit_master_xml,
+    verify_unit_round_trip
+)
 
 class ImportedStockItem(BaseModel):
     name: str
@@ -649,95 +656,24 @@ class GlobalStockItemStore:
         conversion: Optional[Decimal] = None
     ) -> str:
         """
-        Generates master XML snippet strictly conforming to stock items list sample.xml.
+        Generates master XML snippet strictly conforming to stock items list sample.xml
+        via authoritative Tally Master Generator with mandatory round-trip validation.
         """
-        import xml.sax.saxutils as saxutils
-        clean_name = saxutils.escape(" ".join(name.strip().split()))
-        clean_uom = saxutils.escape((uom or "NOS").strip())
-        clean_parent = saxutils.escape((parent_group or "Primary").strip())
-        hsn_str = saxutils.escape((hsn or "").strip())
-
-        lines = [
-            '<TALLYMESSAGE xmlns:UDF="TallyUDF">',
-            f' <STOCKITEM NAME="{clean_name}" ACTION="Create">',
-            f'  <NAME>{clean_name}</NAME>',
-            f'  <PARENT>{clean_parent}</PARENT>',
-            f'  <BASEUNITS>{clean_uom}</BASEUNITS>',
-        ]
-
-        if additional_units and conversion and conversion > Decimal("1"):
-            clean_alt = saxutils.escape(additional_units.strip())
-            lines.extend([
-                f'  <ADDITIONALUNITS>{clean_alt}</ADDITIONALUNITS>',
-                '  <DENOMINATOR>1</DENOMINATOR>',
-                f'  <CONVERSION>{int(conversion)}</CONVERSION>'
-            ])
-
-        lines.extend([
-            '  <GSTAPPLICABLE>&#4; Applicable</GSTAPPLICABLE>',
-            f'  <GSTTYPEOFSUPPLY>{saxutils.escape(type_of_supply or "Goods")}</GSTTYPEOFSUPPLY>',
-            '  <ISCOSTCENTRESON>No</ISCOSTCENTRESON>',
-            '  <ISBATCHWISEON>No</ISBATCHWISEON>',
-            '  <ISPERISHABLEON>No</ISPERISHABLEON>',
-            '  <OPENINGBALANCE>0</OPENINGBALANCE>'
-        ])
-
-        if gst_rate is not None and gst_rate > Decimal("0.00") and (taxability or "Taxable").lower() == "taxable":
-            cgst = (gst_rate / Decimal("2")).quantize(Decimal("0.01"))
-            sgst = cgst
-            igst = gst_rate
-            lines.extend([
-                '  <GSTDETAILS.LIST>',
-                '   <APPLICABLEFROM>20210401</APPLICABLEFROM>',
-                '   <CALCULATIONTYPE>On Value</CALCULATIONTYPE>',
-                '   <TAXABILITY>Taxable</TAXABILITY>',
-                '   <SRCOFGSTDETAILS>Specify Details Here</SRCOFGSTDETAILS>',
-                '   <STATEWISEDETAILS.LIST>',
-                '    <STATENAME>&#4; Any</STATENAME>',
-                '    <RATEDETAILS.LIST>',
-                '     <GSTRATEDUTYHEAD>CGST</GSTRATEDUTYHEAD>',
-                '     <GSTRATEVALUATIONTYPE>Based on Value</GSTRATEVALUATIONTYPE>',
-                f'     <GSTRATE> {cgst}</GSTRATE>',
-                '    </RATEDETAILS.LIST>',
-                '    <RATEDETAILS.LIST>',
-                '     <GSTRATEDUTYHEAD>SGST/UTGST</GSTRATEDUTYHEAD>',
-                '     <GSTRATEVALUATIONTYPE>Based on Value</GSTRATEVALUATIONTYPE>',
-                f'     <GSTRATE> {sgst}</GSTRATE>',
-                '    </RATEDETAILS.LIST>',
-                '    <RATEDETAILS.LIST>',
-                '     <GSTRATEDUTYHEAD>IGST</GSTRATEDUTYHEAD>',
-                '     <GSTRATEVALUATIONTYPE>Based on Value</GSTRATEVALUATIONTYPE>',
-                f'     <GSTRATE> {igst}</GSTRATE>',
-                '    </RATEDETAILS.LIST>',
-                '   </STATEWISEDETAILS.LIST>',
-                '  </GSTDETAILS.LIST>'
-            ])
-        elif taxability and taxability.lower() in ("exempt", "nil rated"):
-            t_cap = "Exempt" if taxability.lower() == "exempt" else "Nil Rated"
-            lines.extend([
-                '  <GSTDETAILS.LIST>',
-                '   <APPLICABLEFROM>20210401</APPLICABLEFROM>',
-                '   <CALCULATIONTYPE>On Value</CALCULATIONTYPE>',
-                f'   <TAXABILITY>{t_cap}</TAXABILITY>',
-                '   <SRCOFGSTDETAILS>Specify Details Here</SRCOFGSTDETAILS>',
-                '  </GSTDETAILS.LIST>'
-            ])
-
-        if hsn_str:
-            lines.extend([
-                '  <HSNDETAILS.LIST>',
-                '   <APPLICABLEFROM>20210401</APPLICABLEFROM>',
-                f'   <HSNCODE>{hsn_str}</HSNCODE>',
-                '   <SRCOFHSNDETAILS>Specify Details Here</SRCOFHSNDETAILS>',
-                '  </HSNDETAILS.LIST>'
-            ])
-
-        lines.extend([
-            ' </STOCKITEM>',
-            '</TALLYMESSAGE>'
-        ])
-
-        return "\n".join(lines)
+        c_val = int(conversion) if conversion and conversion >= 1 else None
+        draft = StockItemDraft(
+            name=name.strip(),
+            parent_group=parent_group or "Primary",
+            base_unit=uom or "NOS",
+            alternate_unit=additional_units,
+            conversion=c_val,
+            hsn_code=hsn,
+            gst_rate=gst_rate if gst_rate is not None else Decimal("0.00"),
+            taxability=taxability or "Taxable",
+            type_of_supply=type_of_supply or "Goods"
+        )
+        xml = generate_stock_item_master_xml(draft)
+        verify_stock_item_round_trip(draft, xml)
+        return xml
 
     def generate_all_masters_xml(
         self,
@@ -747,71 +683,10 @@ class GlobalStockItemStore:
     ) -> str:
         """
         Generates complete Tally All Masters import XML strictly conforming
-        to 'stock items list sample.xml'.
+        to 'stock items list sample.xml' and PRD Addendum 6.
         Defines <UNIT> messages first, then <STOCKITEM> messages.
         """
         import xml.sax.saxutils as saxutils
-
-        UQC_MAP = {
-            "BAG": "BAG-BAGS",
-            "BAGS": "BAG-BAGS",
-            "BOX": "BOX-BOX",
-            "BOXES": "BOX-BOX",
-            "BTL": "BTL-BOTTLES",
-            "BOTTLE": "BTL-BOTTLES",
-            "BOTTLES": "BTL-BOTTLES",
-            "CAN": "PCS-PIECES",
-            "CANS": "PCS-PIECES",
-            "CASE": "PCS-PIECES",
-            "CASES": "PCS-PIECES",
-            "CRATE": "BOX-BOX",
-            "CTN": "CTN-CARTONS",
-            "CARTON": "CTN-CARTONS",
-            "CARTONS": "CTN-CARTONS",
-            "DOZ": "DOZ-DOZENS",
-            "DOZEN": "DOZ-DOZENS",
-            "DZN": "DOZ-DOZENS",
-            "GM": "GMS-GRAMMES",
-            "GMS": "GMS-GRAMMES",
-            "HANGER": "BOX-BOX",
-            "HRS": "BOX-BOX",
-            "KG": "KGS-KILOGRAMS",
-            "KGS": "KGS-KILOGRAMS",
-            "KILOGRAM": "KGS-KILOGRAMS",
-            "LARI": "PAC-PACKS",
-            "LTR": "LTR-LITRES",
-            "LTRS": "LTR-LITRES",
-            "ML": "MLT-MILILITRE",
-            "MLT": "MLT-MILILITRE",
-            "MTR": "MTR-METERS",
-            "NAG": "NOS-NUMBERS",
-            "NOS": "NOS-NUMBERS",
-            "PAC": "PAC-PACKS",
-            "PACK": "PAC-PACKS",
-            "PACKS": "PAC-PACKS",
-            "PATTA": "PAC-PACKS",
-            "PCS": "PCS-PIECES",
-            "PIECES": "PCS-PIECES",
-            "PIECE": "PCS-PIECES",
-            "PKT": "PAC-PACKS",
-            "POUCH": "PCS-PIECES",
-            "QTL": "QTL-QUINTAL",
-            "ROLL": "ROL-ROLLS",
-            "ROLLS": "ROL-ROLLS",
-            "SET": "SET-SETS",
-            "SETS": "SET-SETS",
-            "SQF": "SQF-SQUARE FEET",
-            "SQM": "SQM-SQUARE METERS",
-            "TBS": "TBS-TABLETS",
-            "TIN": "PCS-PIECES",
-            "TON": "TON-TONNES",
-            "TREE": "BOX-BOX",
-            "TUB": "TUB-TUBES",
-            "UNT": "UNT-UNITS",
-            "UNIT": "UNT-UNITS",
-            "UNITS": "UNT-UNITS",
-            "YDS": "YDS-YARDS",
-        }
 
         c_name = saxutils.escape(company_name.strip() if company_name else "Kartar Singh & Sons - (from 1-Apr-25)")
 
@@ -831,38 +706,24 @@ class GlobalStockItemStore:
             '   <REQUESTDATA>'
         ]
 
-        # 1. Collect unique units
+        # 1. Collect unique units (both base and alternate)
         units_seen = set()
         unique_units = []
         for it in items:
-            raw_u = str(it.get("uom") or it.get("base_units") or "NOS").strip()
+            raw_u = str(it.get("uom") or it.get("base_units") or it.get("base_unit") or "NOS").strip()
             u_clean = raw_u if raw_u else "NOS"
             if u_clean.upper() not in units_seen:
                 units_seen.add(u_clean.upper())
                 unique_units.append(u_clean)
+            raw_alt = str(it.get("additional_units") or it.get("alternate_unit") or "").strip()
+            if raw_alt and raw_alt.upper() not in units_seen:
+                units_seen.add(raw_alt.upper())
+                unique_units.append(raw_alt)
 
         for u in unique_units:
-            u_esc = saxutils.escape(u)
-            uqc = UQC_MAP.get(u.upper(), f"{u.upper()}-{u.upper()}")
-            uqc_esc = saxutils.escape(uqc)
-            lines.extend([
-                '    <TALLYMESSAGE xmlns:UDF="TallyUDF">',
-                f'     <UNIT NAME="{u_esc}" RESERVEDNAME="">',
-                f'      <NAME>{u_esc}</NAME>',
-                f'      <GSTREPUOM>{uqc_esc}</GSTREPUOM>',
-                '      <ISUPDATINGTARGETID>No</ISUPDATINGTARGETID>',
-                '      <ISDELETED>No</ISDELETED>',
-                '      <ISSECURITYONWHENENTERED>No</ISSECURITYONWHENENTERED>',
-                '      <ASORIGINAL>Yes</ASORIGINAL>',
-                '      <ISGSTEXCLUDED>No</ISGSTEXCLUDED>',
-                '      <ISSIMPLEUNIT>Yes</ISSIMPLEUNIT>',
-                '      <REPORTINGUQCDETAILS.LIST>',
-                '       <APPLICABLEFROM>20210401</APPLICABLEFROM>',
-                f'       <REPORTINGUQCNAME>{uqc_esc}</REPORTINGUQCNAME>',
-                '      </REPORTINGUQCDETAILS.LIST>',
-                '     </UNIT>',
-                '    </TALLYMESSAGE>'
-            ])
+            unit_xml = generate_unit_master_xml(u)
+            verify_unit_round_trip(u, unit_xml)
+            lines.append(unit_xml)
 
         # 2. Stock Items
         items_seen = set()
@@ -874,12 +735,6 @@ class GlobalStockItemStore:
                 continue
             items_seen.add(raw_name.upper())
 
-            name_esc = saxutils.escape(" ".join(raw_name.split()))
-            parent_esc = saxutils.escape(str(it.get("parent") or it.get("parent_group") or it.get("group") or default_parent_group).strip())
-            uom_esc = saxutils.escape(str(it.get("uom") or it.get("base_units") or "NOS").strip())
-            hsn_raw = str(it.get("hsn") or it.get("hsn_code") or it.get("hsn_sac") or "").strip()
-            hsn_esc = saxutils.escape(hsn_raw)
-
             # GST rate calculation
             gst_val = it.get("gst_rate") or it.get("gst_pct")
             try:
@@ -887,65 +742,33 @@ class GlobalStockItemStore:
             except Exception:
                 gst_dec = Decimal("0.00")
 
-            cgst = (gst_dec / Decimal("2")).quantize(Decimal("0.01")) if gst_dec > 0 else Decimal("0.00")
-            sgst = cgst
-            igst = gst_dec
+            conv_raw = it.get("conversion")
+            conv_val = None
+            if conv_raw:
+                try:
+                    c_float = float(str(conv_raw))
+                    if c_float >= 1:
+                        conv_val = int(c_float)
+                except Exception:
+                    pass
 
-            lines.extend([
-                '    <TALLYMESSAGE xmlns:UDF="TallyUDF">',
-                f'     <STOCKITEM NAME="{name_esc}" RESERVEDNAME="" ACTION="Create">',
-                f'      <NAME>{name_esc}</NAME>',
-                f'      <PARENT>{parent_esc}</PARENT>',
-                f'      <BASEUNITS>{uom_esc}</BASEUNITS>',
-                '      <GSTAPPLICABLE>&#4; Applicable</GSTAPPLICABLE>',
-                '      <GSTTYPEOFSUPPLY>Goods</GSTTYPEOFSUPPLY>',
-                '      <ISCOSTCENTRESON>No</ISCOSTCENTRESON>',
-                '      <ISBATCHWISEON>No</ISBATCHWISEON>',
-                '      <ISPERISHABLEON>No</ISPERISHABLEON>',
-                '      <OPENINGBALANCE>0</OPENINGBALANCE>'
-            ])
+            alt_unit = str(it.get("additional_units") or it.get("alternate_unit") or "").strip() or None
 
-            if gst_dec > Decimal("0.00"):
-                lines.extend([
-                    '      <GSTDETAILS.LIST>',
-                    '       <APPLICABLEFROM>20210401</APPLICABLEFROM>',
-                    '       <CALCULATIONTYPE>On Value</CALCULATIONTYPE>',
-                    '       <TAXABILITY>Taxable</TAXABILITY>',
-                    '       <SRCOFGSTDETAILS>Specify Details Here</SRCOFGSTDETAILS>',
-                    '       <STATEWISEDETAILS.LIST>',
-                    '        <STATENAME>&#4; Any</STATENAME>',
-                    '        <RATEDETAILS.LIST>',
-                    '         <GSTRATEDUTYHEAD>CGST</GSTRATEDUTYHEAD>',
-                    '         <GSTRATEVALUATIONTYPE>Based on Value</GSTRATEVALUATIONTYPE>',
-                    f'         <GSTRATE> {cgst}</GSTRATE>',
-                    '        </RATEDETAILS.LIST>',
-                    '        <RATEDETAILS.LIST>',
-                    '         <GSTRATEDUTYHEAD>SGST/UTGST</GSTRATEDUTYHEAD>',
-                    '         <GSTRATEVALUATIONTYPE>Based on Value</GSTRATEVALUATIONTYPE>',
-                    f'         <GSTRATE> {sgst}</GSTRATE>',
-                    '        </RATEDETAILS.LIST>',
-                    '        <RATEDETAILS.LIST>',
-                    '         <GSTRATEDUTYHEAD>IGST</GSTRATEDUTYHEAD>',
-                    '         <GSTRATEVALUATIONTYPE>Based on Value</GSTRATEVALUATIONTYPE>',
-                    f'         <GSTRATE> {igst}</GSTRATE>',
-                    '        </RATEDETAILS.LIST>',
-                    '       </STATEWISEDETAILS.LIST>',
-                    '      </GSTDETAILS.LIST>'
-                ])
-
-            if hsn_esc:
-                lines.extend([
-                    '      <HSNDETAILS.LIST>',
-                    '       <APPLICABLEFROM>20210401</APPLICABLEFROM>',
-                    f'       <HSNCODE>{hsn_esc}</HSNCODE>',
-                    '       <SRCOFHSNDETAILS>Specify Details Here</SRCOFHSNDETAILS>',
-                    '      </HSNDETAILS.LIST>'
-                ])
-
-            lines.extend([
-                '     </STOCKITEM>',
-                '    </TALLYMESSAGE>'
-            ])
+            draft = StockItemDraft(
+                name=raw_name,
+                parent_group=str(it.get("parent") or it.get("parent_group") or it.get("group") or default_parent_group).strip(),
+                base_unit=str(it.get("uom") or it.get("base_units") or it.get("base_unit") or "NOS").strip(),
+                alternate_unit=alt_unit,
+                conversion=conv_val,
+                hsn_code=str(it.get("hsn") or it.get("hsn_code") or it.get("hsn_sac") or "").strip() or None,
+                hsn_description=str(it.get("hsn_description") or it.get("description") or "").strip() or None,
+                gst_rate=gst_dec,
+                taxability=str(it.get("taxability") or "Taxable"),
+                type_of_supply=str(it.get("type_of_supply") or it.get("gst_type_of_supply") or "Goods")
+            )
+            item_xml = generate_stock_item_master_xml(draft)
+            verify_stock_item_round_trip(draft, item_xml)
+            lines.append(item_xml)
 
         lines.extend([
             '   </REQUESTDATA>',

@@ -30,6 +30,11 @@ class PartyInfo(BaseModel):
     repaired_gstin: Optional[str] = None
     matched_ledger_name: Optional[str] = None
     requires_ledger_creation: bool = False
+    registration_type: Optional[str] = None
+    pincode: Optional[str] = None
+    parent_group: Optional[str] = None
+    alias: Optional[str] = None
+    saved_draft_version: Optional[int] = None
     mapping_confidence: Literal["HIGH", "MEDIUM", "LOW", "UNMATCHED"] = "UNMATCHED"
     mapping_status: Literal["AUTO_MAPPED", "PLEASE_CHECK", "POSSIBLE_MATCH", "UNMATCHED", "NEW_LEDGER"] = "UNMATCHED"
     match_suggestions: List[Dict[str, Any]] = Field(default_factory=list)
@@ -46,6 +51,8 @@ class InvoiceItem(BaseModel):
     item_name: str = ""
     description: Optional[str] = None
     hsn_sac: Optional[str] = None
+    hsn_description: Optional[str] = None
+    saved_draft_version: Optional[int] = None
     quantity: Decimal = Decimal("1.00")
     invoice_qty: Optional[Decimal] = None
     pack_multiplier: Optional[Decimal] = None
@@ -275,6 +282,7 @@ class FinalInvoiceSnapshot(BaseModel):
     company_name: Optional[str] = None
     auto_create_items: bool = True
     auto_create_parties: bool = True
+    has_unsaved_master_edits: bool = False
     voucher_numbering_mode: Literal["AS_INVOICE", "SEQUENTIAL"] = "AS_INVOICE"
     starting_voucher_number: int = 1
 

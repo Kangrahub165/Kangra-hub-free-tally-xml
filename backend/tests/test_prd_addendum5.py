@@ -191,7 +191,7 @@ def test_addendum5_golden_sample_stock_item_xml_structure():
     assert "<ADDITIONALUNITS>CTN</ADDITIONALUNITS>" in xml_str
     assert "<OPENINGBALANCE>0</OPENINGBALANCE>" in xml_str
     assert "<GSTRATE> 6.00</GSTRATE>" in xml_str
-    assert "<GSTRATE> 12.0</GSTRATE>" in xml_str
+    assert "<GSTRATE> 12.00</GSTRATE>" in xml_str
 
 
 def test_addendum5_one_file_import_masters_and_vouchers():

@@ -68,12 +68,14 @@ import {
   createNewStockItem,
   getUserLedgers,
   importLedgers,
-  createLedger
+  createLedger,
+  createLedgerMaster
 } from '@/lib/api';
 import { CompanyProfileDropdown } from '@/components/CompanyProfileDropdown';
 import { StockItemSearchModal } from '@/components/StockItemSearchModal';
 import { ScanBillModal } from '@/components/ScanBillModal';
 import { CreateStockItemMasterModal } from '@/components/CreateStockItemMasterModal';
+import { CreateLedgerMasterModal } from '@/components/CreateLedgerMasterModal';
 import { downloadStockItemsMasterXmlFile, CompanyProfile } from '@/lib/stockItemsMasterXml';
 import { convertQuantityAndRate } from '@/lib/unitConverter';
 import { mergeSizeIntoItemName } from '@/lib/utils';
@@ -1407,11 +1409,13 @@ export default function PurchasePage() {
       parent_group: string;
       uom: string;
       hsn?: string;
+      hsn_description?: string;
       gst_rate: number;
       taxability: string;
       type_of_supply: string;
       additional_units?: string;
       conversion?: number;
+      saved_draft_version?: number;
     },
     saveAndNext: boolean = false,
     applyToAllNew: boolean = false
@@ -1420,6 +1424,7 @@ export default function PurchasePage() {
       const res = await createNewStockItem({
         name: savedData.name,
         hsn: savedData.hsn,
+        hsn_description: savedData.hsn_description,
         uom: savedData.uom,
         parent_group: savedData.parent_group,
         gst_rate: savedData.gst_rate,
@@ -1439,12 +1444,14 @@ export default function PurchasePage() {
                 item_name: res.item.name,
                 uom: res.item.base_units || it.uom,
                 hsn_sac: res.item.hsn_code || it.hsn_sac,
+                hsn_description: savedData.hsn_description || (it as any).hsn_description,
                 parent_group: savedData.parent_group,
                 taxability: savedData.taxability,
                 type_of_supply: savedData.type_of_supply,
                 gst_rate: savedData.gst_rate,
                 alternate_uom: savedData.additional_units || it.alternate_uom,
                 pack_multiplier: savedData.conversion ? savedData.conversion : it.pack_multiplier,
+                saved_draft_version: savedData.saved_draft_version || 1,
                 requires_item_creation: true,
                 mapping_status: 'VERIFIED' as const,
                 mapping_confidence: 'HIGH' as const,
@@ -1491,24 +1498,38 @@ export default function PurchasePage() {
     }
   };
 
-  // Create new Vendor Ledger action
-  const handleCreateNewLedgerSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newLedgerData.name.trim()) return;
+  // Create new Vendor Ledger action (PRD Addendum 6)
+  const handleSaveLedgerMaster = async (savedData: {
+    name: string;
+    alias?: string;
+    parent_group: string;
+    address_lines: string[];
+    state: string;
+    country: string;
+    pincode?: string;
+    gstin?: string;
+    pan?: string;
+    registration_type: string;
+    saved_draft_version?: number;
+  }) => {
     try {
-      await createLedger({
-        name: newLedgerData.name.trim(),
-        group: newLedgerData.group.trim() || 'Sundry Creditors',
-        party_gstin: newLedgerData.gstin.trim() || undefined,
-        state: newLedgerData.state.trim() || undefined,
-      });
+      await createLedgerMaster(savedData);
 
       if (currentInvoice) {
         updateCurrentInvoice((inv) => ({
           ...inv,
           supplier: {
             ...inv.supplier,
-            matched_ledger_name: newLedgerData.name.trim(),
+            name: savedData.name,
+            matched_ledger_name: savedData.name,
+            gstin: savedData.gstin,
+            pan: savedData.pan,
+            state: savedData.state,
+            pincode: savedData.pincode,
+            address: savedData.address_lines.join(', '),
+            registration_type: savedData.registration_type,
+            parent_group: savedData.parent_group,
+            saved_draft_version: savedData.saved_draft_version || 1,
             requires_ledger_creation: false,
             mapping_status: 'AUTO_MAPPED',
             mapping_confidence: 'HIGH',
@@ -1516,10 +1537,9 @@ export default function PurchasePage() {
         }));
       }
 
-      showAlert('Vendor Ledger Created', `Vendor Ledger "${newLedgerData.name.trim()}" created successfully!`, 'success');
+      showAlert('Vendor Ledger Created', `Vendor Ledger "${savedData.name}" created and verified in Tally masters!`, 'success');
       loadMasters();
       setIsNewLedgerModalOpen(false);
-      setNewLedgerData({ name: '', group: 'Sundry Creditors', gstin: '', state: '' });
     } catch (err: any) {
       showAlert('Creation Failed', `Failed to create ledger: ${err.message}`, 'error');
     }
@@ -4008,68 +4028,32 @@ export default function PurchasePage() {
         onUseExistingItem={handleUseExistingStockItem}
       />
 
-      {/* MODAL: CREATE NEW VENDOR LEDGER */}
-      <Modal
+      {/* SMART CREATE PARTY LEDGER MASTER MODAL (PRD Addendum 6) */}
+      <CreateLedgerMasterModal
         isOpen={isNewLedgerModalOpen}
         onClose={() => setIsNewLedgerModalOpen(false)}
-        title="Create Vendor Ledger in Tally"
-        size="md"
-      >
-        <form onSubmit={handleCreateNewLedgerSubmit} className="space-y-4 text-xs">
-          <p className="text-slate-600">
-            Create a Vendor Ledger indexed in Tally masters under <code className="bg-slate-100 px-1 py-0.5 rounded font-mono">Sundry Creditors</code>.
-          </p>
-
-          <div>
-            <label className="block font-semibold text-slate-700 mb-1">Vendor / Ledger Name *</label>
-            <Input
-              value={newLedgerData.name}
-              onChange={(e) => setNewLedgerData({ ...newLedgerData, name: e.target.value })}
-              required
-              className="text-xs font-bold"
-            />
-          </div>
-
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block font-semibold text-slate-700 mb-1">Vendor GSTIN</label>
-              <Input
-                value={newLedgerData.gstin}
-                onChange={(e) => setNewLedgerData({ ...newLedgerData, gstin: e.target.value.toUpperCase() })}
-                placeholder="15 digits"
-                className="text-xs font-mono uppercase"
-              />
-            </div>
-            <div>
-              <label className="block font-semibold text-slate-700 mb-1">State</label>
-              <Input
-                value={newLedgerData.state}
-                onChange={(e) => setNewLedgerData({ ...newLedgerData, state: e.target.value })}
-                placeholder="State"
-                className="text-xs"
-              />
-            </div>
-          </div>
-
-          <div>
-            <label className="block font-semibold text-slate-700 mb-1">Under Group</label>
-            <Input
-              value={newLedgerData.group}
-              onChange={(e) => setNewLedgerData({ ...newLedgerData, group: e.target.value })}
-              className="text-xs"
-            />
-          </div>
-
-          <div className="flex justify-end gap-2 pt-3 border-t border-slate-100">
-            <Button variant="outline" size="sm" type="button" onClick={() => setIsNewLedgerModalOpen(false)}>
-              Cancel
-            </Button>
-            <Button variant="primary" size="sm" type="submit" className="font-bold bg-emerald-600 hover:bg-emerald-700 text-white">
-              Save & Map Vendor
-            </Button>
-          </div>
-        </form>
-      </Modal>
+        party={currentInvoice ? {
+          name: currentInvoice.supplier.name,
+          alias: (currentInvoice.supplier as any).alias,
+          gstin: currentInvoice.supplier.gstin,
+          pan: (currentInvoice.supplier as any).pan,
+          address: currentInvoice.supplier.address,
+          state: currentInvoice.supplier.state,
+          pincode: (currentInvoice.supplier as any).pincode,
+          country: (currentInvoice.supplier as any).country,
+          registration_type: (currentInvoice.supplier as any).registration_type,
+          parent_group: 'Sundry Creditors',
+          saved_draft_version: (currentInvoice.supplier as any).saved_draft_version,
+        } : null}
+        initialInvoiceValues={currentInvoice ? {
+          name: currentInvoice.supplier.name,
+          gstin: currentInvoice.supplier.gstin,
+          state: currentInvoice.supplier.state,
+          address: currentInvoice.supplier.address,
+        } : null}
+        defaultParentGroup="Sundry Creditors"
+        onSaveMaster={handleSaveLedgerMaster}
+      />
 
       {/* MODAL: XML PREVIEW */}
       <Modal

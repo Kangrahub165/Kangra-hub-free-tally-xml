@@ -118,8 +118,9 @@ def test_generate_new_stock_item_xml():
         parent_group="Beverages 28%",
         gst_rate=Decimal("28.00")
     )
-    assert "<STOCKITEM NAME=\"New Test Product 500ML\" ACTION=\"Create\">" in xml_str
+    assert '<STOCKITEM NAME="New Test Product 500ML"' in xml_str
+    assert 'ACTION="Create"' in xml_str
     assert "<PARENT>Beverages 28%</PARENT>" in xml_str
-    assert "<BASEUNITS>case</BASEUNITS>" in xml_str
+    assert "<BASEUNITS>CASE</BASEUNITS>" in xml_str
     assert "<HSNCODE>22021010</HSNCODE>" in xml_str
     assert "<GSTRATE> 28.00</GSTRATE>" in xml_str or "<GSTRATE>28.00</GSTRATE>" in xml_str

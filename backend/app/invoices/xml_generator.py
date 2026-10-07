@@ -18,6 +18,20 @@ from app.invoices.table_engine import (
     spread_paise
 )
 
+from app.accounting.tally_master_generator import (
+    StockItemDraft,
+    LedgerDraft,
+    generate_stock_item_master_xml,
+    verify_stock_item_round_trip,
+    generate_ledger_master_xml,
+    verify_ledger_round_trip,
+    generate_unit_master_xml,
+    verify_unit_round_trip,
+    generate_stock_group_master_xml,
+    extract_pan_from_gstin,
+    MasterRoundTripMismatchError
+)
+
 def escape_xml(text: Optional[str]) -> str:
     """Escapes XML entities (&, <, >, \", ')."""
     if not text:
@@ -67,6 +81,10 @@ class InvoiceTallyXMLGenerator:
     """
 
     def generate_xml(self, snapshot: FinalInvoiceSnapshot) -> str:
+        # PRD Addendum 6 Section 3.4: Unsaved master edits block XML generation
+        if getattr(snapshot, "has_unsaved_master_edits", False):
+            raise ValueError("You have unsaved changes. Please save all Create Master edits before generating XML.")
+
         mapping = snapshot.ledger_mapping
         raw_company = snapshot.company_name or "Kartar Singh & Sons - (from 1-Apr-25)"
         company_name = html.unescape(raw_company)
@@ -148,7 +166,7 @@ class InvoiceTallyXMLGenerator:
         }
 
         for inv in snapshot.invoices:
-            # 1. Units of Measure
+            # 1. Units of Measure (missing only)
             if snapshot.auto_create_items:
                 for it in inv.items:
                     uoms_to_create = set()
@@ -165,22 +183,9 @@ class InvoiceTallyXMLGenerator:
                     for u in uoms_to_create:
                         if u and u not in created_units:
                             created_units.add(u)
-                            u_esc = escape_xml(u)
-                            uqc = UQC_MAPPING.get(u.upper(), f"{u.upper()}-{u.upper()}")
-                            uqc_esc = escape_xml(uqc)
-                            unit_lines.extend([
-                                '    <TALLYMESSAGE xmlns:UDF="TallyUDF">',
-                                f'     <UNIT NAME="{u_esc}" ACTION="Create">',
-                                f'      <NAME>{u_esc}</NAME>',
-                                f'      <GSTREPUOM>{uqc_esc}</GSTREPUOM>',
-                                '      <ISSIMPLEUNIT>Yes</ISSIMPLEUNIT>',
-                                '      <REPORTINGUQCDETAILS.LIST>',
-                                '       <APPLICABLEFROM>20210401</APPLICABLEFROM>',
-                                f'       <REPORTINGUQCNAME>{uqc_esc}</REPORTINGUQCNAME>',
-                                '      </REPORTINGUQCDETAILS.LIST>',
-                                '     </UNIT>',
-                                '    </TALLYMESSAGE>'
-                            ])
+                            xml_u = generate_unit_master_xml(u)
+                            verify_unit_round_trip(u, xml_u)
+                            unit_lines.append(xml_u)
 
             # 2. Stock Groups (PRD Addendum 5: Auto-create any non-Primary groups)
             if snapshot.auto_create_items:
@@ -188,16 +193,7 @@ class InvoiceTallyXMLGenerator:
                     grp = (getattr(it, "parent_group", None) or "Primary").strip()
                     if grp and grp != "Primary" and grp not in created_groups:
                         created_groups.add(grp)
-                        g_esc = escape_xml(grp)
-                        group_lines.extend([
-                            '    <TALLYMESSAGE xmlns:UDF="TallyUDF">',
-                            f'     <STOCKGROUP NAME="{g_esc}" ACTION="Create">',
-                            f'      <NAME>{g_esc}</NAME>',
-                            '      <PARENT>Primary</PARENT>',
-                            '      <ISADDABLE>Yes</ISADDABLE>',
-                            '     </STOCKGROUP>',
-                            '    </TALLYMESSAGE>'
-                        ])
+                        group_lines.append(generate_stock_group_master_xml(grp, "Primary"))
 
             # 3. Party Ledgers
             if snapshot.auto_create_parties:
@@ -205,14 +201,14 @@ class InvoiceTallyXMLGenerator:
                 p_name = (party.name or "").strip()
                 if p_name and p_name not in created_parties and party.requires_ledger_creation:
                     created_parties.add(p_name)
-                    parent_grp = "Sundry Creditors" if inv.invoice_type == "PURCHASE" else "Sundry Debtors"
+                    parent_grp = getattr(party, "parent_group", None) or ("Sundry Creditors" if inv.invoice_type == "PURCHASE" else "Sundry Debtors")
                     ledger_lines.extend(self._generate_party_ledger_master(party, parent_grp))
 
             # 4. Stock Items
             if snapshot.auto_create_items:
                 for it in inv.items:
                     uom_clean = (it.tally_uom or it.uom or "NOS").strip()
-                    item_clean = (it.item_name or "").strip()
+                    item_clean = (it.matched_stock_item or it.item_name or "").strip()
                     if item_clean and item_clean not in created_items and it.requires_item_creation:
                         created_items.add(item_clean)
                         stock_lines.extend(self._generate_stock_item_master(it, uom_clean))
@@ -220,17 +216,7 @@ class InvoiceTallyXMLGenerator:
         return unit_lines + group_lines + ledger_lines + stock_lines
 
     def _generate_stock_item_master(self, item: InvoiceItem, uom: str) -> List[str]:
-        name_esc = escape_xml(item.item_name)
-        hsn_esc = escape_xml(item.hsn_sac or "")
         tot_rate = item.igst_rate if item.igst_rate > Decimal("0.00") else (item.cgst_rate + item.sgst_rate)
-        parent_name = getattr(item, "parent_group", None) or "Primary"
-        parent_esc = escape_xml(parent_name.strip() if parent_name else "Primary")
-        taxability_val = getattr(item, "taxability", None) or "Taxable"
-        taxability_esc = escape_xml(taxability_val.strip())
-        supply_val = getattr(item, "type_of_supply", None) or "Goods"
-        supply_esc = escape_xml(supply_val.strip())
-
-        # Base vs Alternate unit handling (PRD Addendum 2 Part B & D)
         base_uom = uom
         alt_uom = (item.alternate_uom or item.uom_option_a or "").strip()
         conv = item.pack_multiplier
@@ -242,110 +228,50 @@ class InvoiceTallyXMLGenerator:
             base_uom = item.uom_option_b
             alt_uom = uom
 
-        lines = [
-            '    <TALLYMESSAGE xmlns:UDF="TallyUDF">',
-            f'     <STOCKITEM NAME="{name_esc}" ACTION="Create">',
-            f'      <NAME>{name_esc}</NAME>',
-            f'      <PARENT>{parent_esc}</PARENT>',
-            f'      <BASEUNITS>{escape_xml(base_uom)}</BASEUNITS>',
-        ]
+        name_clean = (item.matched_stock_item or item.item_name or "").strip()
+        conv_val = int(conv) if conv and conv >= 1 else None
 
-        if alt_uom and conv and conv > Decimal("1") and alt_uom != base_uom:
-            lines.append(f'      <ADDITIONALUNITS>{escape_xml(alt_uom)}</ADDITIONALUNITS>')
-            lines.append('      <DENOMINATOR>1</DENOMINATOR>')
-            lines.append(f'      <CONVERSION>{int(conv)}</CONVERSION>')
-
-        lines.extend([
-            '      <GSTAPPLICABLE>&#4; Applicable</GSTAPPLICABLE>',
-            f'      <GSTTYPEOFSUPPLY>{supply_esc}</GSTTYPEOFSUPPLY>',
-            '      <ISCOSTCENTRESON>No</ISCOSTCENTRESON>',
-            '      <ISBATCHWISEON>No</ISBATCHWISEON>',
-            '      <ISPERISHABLEON>No</ISPERISHABLEON>',
-            '      <OPENINGBALANCE>0</OPENINGBALANCE>'
-        ])
-
-        # Complete GSTDETAILS.LIST matching golden sample
-        if tot_rate > Decimal("0.00") and taxability_val.lower() == "taxable":
-            cgst = item.cgst_rate if item.cgst_rate > Decimal("0.00") else (tot_rate / Decimal("2")).quantize(Decimal("0.01"))
-            sgst = item.sgst_rate if item.sgst_rate > Decimal("0.00") else cgst
-            lines.extend([
-                '      <GSTDETAILS.LIST>',
-                '       <APPLICABLEFROM>20210401</APPLICABLEFROM>',
-                '       <CALCULATIONTYPE>On Value</CALCULATIONTYPE>',
-                '       <TAXABILITY>Taxable</TAXABILITY>',
-                '       <SRCOFGSTDETAILS>Specify Details Here</SRCOFGSTDETAILS>',
-                '       <STATEWISEDETAILS.LIST>',
-                '        <STATENAME>&#4; Any</STATENAME>',
-                '        <RATEDETAILS.LIST>',
-                '         <GSTRATEDUTYHEAD>CGST</GSTRATEDUTYHEAD>',
-                '         <GSTRATEVALUATIONTYPE>Based on Value</GSTRATEVALUATIONTYPE>',
-                f'         <GSTRATE> {cgst:.2f}</GSTRATE>',
-                '        </RATEDETAILS.LIST>',
-                '        <RATEDETAILS.LIST>',
-                '         <GSTRATEDUTYHEAD>SGST/UTGST</GSTRATEDUTYHEAD>',
-                '         <GSTRATEVALUATIONTYPE>Based on Value</GSTRATEVALUATIONTYPE>',
-                f'         <GSTRATE> {sgst:.2f}</GSTRATE>',
-                '        </RATEDETAILS.LIST>',
-                '        <RATEDETAILS.LIST>',
-                '         <GSTRATEDUTYHEAD>IGST</GSTRATEDUTYHEAD>',
-                '         <GSTRATEVALUATIONTYPE>Based on Value</GSTRATEVALUATIONTYPE>',
-                f'         <GSTRATE> {tot_rate:.2f}</GSTRATE>',
-                '        </RATEDETAILS.LIST>',
-                '       </STATEWISEDETAILS.LIST>',
-                '      </GSTDETAILS.LIST>'
-            ])
-        elif taxability_val.lower() in ("exempt", "nil rated"):
-            t_cap = "Exempt" if taxability_val.lower() == "exempt" else "Nil Rated"
-            lines.extend([
-                '      <GSTDETAILS.LIST>',
-                '       <APPLICABLEFROM>20210401</APPLICABLEFROM>',
-                '       <CALCULATIONTYPE>On Value</CALCULATIONTYPE>',
-                f'       <TAXABILITY>{t_cap}</TAXABILITY>',
-                '       <SRCOFGSTDETAILS>Specify Details Here</SRCOFGSTDETAILS>',
-                '      </GSTDETAILS.LIST>'
-            ])
-
-        # Complete HSNDETAILS.LIST matching golden sample
-        if hsn_esc:
-            lines.extend([
-                '      <HSNDETAILS.LIST>',
-                '       <APPLICABLEFROM>20210401</APPLICABLEFROM>',
-                f'       <HSNCODE>{hsn_esc}</HSNCODE>',
-                '       <SRCOFHSNDETAILS>Specify Details Here</SRCOFHSNDETAILS>',
-                '      </HSNDETAILS.LIST>'
-            ])
-
-        lines.extend([
-            '     </STOCKITEM>',
-            '    </TALLYMESSAGE>'
-        ])
-        return lines
+        draft = StockItemDraft(
+            name=name_clean,
+            parent_group=getattr(item, "parent_group", None) or "Primary",
+            base_unit=base_uom,
+            alternate_unit=alt_uom if (alt_uom and conv and conv >= 1 and alt_uom != base_uom) else None,
+            conversion=int(conv) if (alt_uom and conv and conv >= 1 and alt_uom != base_uom) else None,
+            hsn_code=item.hsn_sac,
+            hsn_description=getattr(item, "hsn_description", None),
+            gst_rate=tot_rate,
+            taxability=getattr(item, "taxability", None) or "Taxable",
+            type_of_supply=getattr(item, "type_of_supply", None) or "Goods"
+        )
+        xml_str = generate_stock_item_master_xml(draft)
+        verify_stock_item_round_trip(draft, xml_str)
+        return [xml_str]
 
     def _generate_party_ledger_master(self, party: any, parent_group: str) -> List[str]:
-        p_name_esc = escape_xml(party.name)
-        lines = [
-            '    <TALLYMESSAGE xmlns:UDF="TallyUDF">',
-            f'     <LEDGER NAME="{p_name_esc}" ACTION="Create">',
-            f'      <NAME>{p_name_esc}</NAME>',
-            f'      <PARENT>{parent_group}</PARENT>',
-            '      <COUNTRYOFRESIDENCE>India</COUNTRYOFRESIDENCE>'
-        ]
-        if party.state or party.gstin:
-            from app.invoices.state_normalizer import normalize_state
-            p_state, _ = normalize_state(party.state or (party.gstin[:2] if party.gstin else None))
-            if p_state:
-                lines.append(f'      <LEDSTATENAME>{escape_xml(p_state)}</LEDSTATENAME>')
-        if party.gstin:
-            lines.append(f'      <PARTYGSTIN>{escape_xml(party.gstin)}</PARTYGSTIN>')
-            lines.append('      <GSTREGISTRATIONTYPE>Regular</GSTREGISTRATIONTYPE>')
-        else:
-            lines.append('      <GSTREGISTRATIONTYPE>Unregistered/Consumer</GSTREGISTRATIONTYPE>')
+        pan_val = getattr(party, "pan", None) or extract_pan_from_gstin(party.gstin)
+        reg_type = getattr(party, "registration_type", None) or ("Regular" if party.gstin else "Unregistered/Consumer")
+        pin = getattr(party, "pincode", None)
+        if not pin and getattr(party, "address", None):
+            m_pin = re.search(r'\b[1-9][0-9]{5}\b', party.address)
+            if m_pin:
+                pin = m_pin.group(0)
 
-        lines.extend([
-            '     </LEDGER>',
-            '    </TALLYMESSAGE>'
-        ])
-        return lines
+        addr_lines = [party.address.strip()] if getattr(party, "address", None) and party.address.strip() else []
+        draft = LedgerDraft(
+            name=party.name,
+            alias=getattr(party, "alias", None),
+            parent_group=getattr(party, "parent_group", None) or parent_group,
+            address_lines=addr_lines,
+            state=party.state or (party.gstin[:2] if party.gstin else None) or "Himachal Pradesh",
+            country="India",
+            pincode=pin,
+            gstin=party.gstin,
+            pan=pan_val,
+            registration_type=reg_type
+        )
+        xml_str = generate_ledger_master_xml(draft)
+        verify_ledger_round_trip(draft, xml_str)
+        return [xml_str]
 
     def _generate_purchase_voucher(
         self,

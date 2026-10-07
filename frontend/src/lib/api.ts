@@ -2256,6 +2256,7 @@ export async function getStockItemUnits(): Promise<StockUnitItem[]> {
 export async function createNewStockItem(data: {
   name: string;
   hsn?: string;
+  hsn_description?: string;
   uom?: string;
   parent_group?: string;
   gst_rate?: number;
@@ -2265,6 +2266,93 @@ export async function createNewStockItem(data: {
   conversion?: number;
 }): Promise<{ success: boolean; item: ImportedStockItem; xml_snippet: string }> {
   return apiFetch('/stock-items/create', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  });
+}
+
+export interface StockItemTallyPreview {
+  name: string;
+  parent_group: string;
+  base_unit: string;
+  alternate_unit?: string | null;
+  conversion?: number | null;
+  conversion_formula?: string | null;
+  hsn_code?: string | null;
+  hsn_description?: string | null;
+  hsn_source: string;
+  taxability: string;
+  gst_source: string;
+  gst_rate: number;
+  cgst_rate: number;
+  sgst_rate: number;
+  type_of_supply: string;
+}
+
+export async function getStockItemTallyPreview(data: {
+  name: string;
+  hsn?: string;
+  hsn_description?: string;
+  uom?: string;
+  parent_group?: string;
+  gst_rate?: number;
+  taxability?: string;
+  type_of_supply?: string;
+  additional_units?: string;
+  conversion?: number;
+}): Promise<{ success: boolean; preview: StockItemTallyPreview; xml_snippet: string }> {
+  return apiFetch('/stock-items/tally-preview', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  });
+}
+
+export interface LedgerTallyPreview {
+  name: string;
+  parent_group: string;
+  state: string;
+  country: string;
+  pan?: string | null;
+  gstin?: string | null;
+  registration_type: string;
+  pincode?: string | null;
+  address_lines: string[];
+}
+
+export async function getLedgerTallyPreview(data: {
+  name: string;
+  alias?: string;
+  parent_group?: string;
+  address_lines?: string[];
+  state?: string;
+  country?: string;
+  pincode?: string;
+  gstin?: string;
+  pan?: string;
+  registration_type?: string;
+}): Promise<{ success: boolean; preview: LedgerTallyPreview; xml_snippet: string }> {
+  return apiFetch('/ledgers/tally-preview', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  });
+}
+
+export async function createLedgerMaster(data: {
+  name: string;
+  alias?: string;
+  parent_group?: string;
+  address_lines?: string[];
+  state?: string;
+  country?: string;
+  pincode?: string;
+  gstin?: string;
+  pan?: string;
+  registration_type?: string;
+}): Promise<{ success: boolean; ledger: any; xml_snippet: string }> {
+  return apiFetch('/ledgers/create-master', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(data),

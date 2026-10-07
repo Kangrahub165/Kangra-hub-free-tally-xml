@@ -65,11 +65,13 @@ import {
   createNewStockItem,
   getUserLedgers,
   importLedgers,
-  createLedger
+  createLedger,
+  createLedgerMaster
 } from '@/lib/api';
 import { CompanyProfileDropdown } from '@/components/CompanyProfileDropdown';
 import { StockItemSearchModal } from '@/components/StockItemSearchModal';
 import { CreateStockItemMasterModal } from '@/components/CreateStockItemMasterModal';
+import { CreateLedgerMasterModal } from '@/components/CreateLedgerMasterModal';
 import { convertQuantityAndRate } from '@/lib/unitConverter';
 import { mergeSizeIntoItemName } from '@/lib/utils';
 import { downloadStockItemsMasterXmlFile, CompanyProfile } from '@/lib/stockItemsMasterXml';
@@ -1371,11 +1373,13 @@ export default function SalesPage() {
       parent_group: string;
       uom: string;
       hsn?: string;
+      hsn_description?: string;
       gst_rate: number;
       taxability: string;
       type_of_supply: string;
       additional_units?: string;
       conversion?: number;
+      saved_draft_version?: number;
     },
     saveAndNext: boolean = false,
     applyToAllNew: boolean = false
@@ -1384,6 +1388,7 @@ export default function SalesPage() {
       const res = await createNewStockItem({
         name: savedData.name,
         hsn: savedData.hsn,
+        hsn_description: savedData.hsn_description,
         uom: savedData.uom,
         parent_group: savedData.parent_group,
         gst_rate: savedData.gst_rate,
@@ -1403,12 +1408,14 @@ export default function SalesPage() {
                 item_name: res.item.name,
                 uom: res.item.base_units || it.uom,
                 hsn_sac: res.item.hsn_code || it.hsn_sac,
+                hsn_description: savedData.hsn_description || (it as any).hsn_description,
                 parent_group: savedData.parent_group,
                 taxability: savedData.taxability,
                 type_of_supply: savedData.type_of_supply,
                 gst_rate: savedData.gst_rate,
                 alternate_uom: savedData.additional_units || it.alternate_uom,
                 pack_multiplier: savedData.conversion ? savedData.conversion : it.pack_multiplier,
+                saved_draft_version: savedData.saved_draft_version || 1,
                 requires_item_creation: true,
                 mapping_status: 'VERIFIED' as const,
                 mapping_confidence: 'HIGH' as const,
@@ -1455,24 +1462,38 @@ export default function SalesPage() {
     }
   };
 
-  // Create new Customer Ledger action
-  const handleCreateNewLedgerSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newLedgerData.name.trim()) return;
+  // Create new Customer Ledger action (PRD Addendum 6)
+  const handleSaveLedgerMaster = async (savedData: {
+    name: string;
+    alias?: string;
+    parent_group: string;
+    address_lines: string[];
+    state: string;
+    country: string;
+    pincode?: string;
+    gstin?: string;
+    pan?: string;
+    registration_type: string;
+    saved_draft_version?: number;
+  }) => {
     try {
-      await createLedger({
-        name: newLedgerData.name.trim(),
-        group: newLedgerData.group.trim() || 'Sundry Debtors',
-        party_gstin: newLedgerData.gstin.trim() || undefined,
-        state: newLedgerData.state.trim() || undefined,
-      });
+      await createLedgerMaster(savedData);
 
       if (currentInvoice) {
         updateCurrentInvoice((inv) => ({
           ...inv,
           buyer: {
             ...inv.buyer,
-            matched_ledger_name: newLedgerData.name.trim(),
+            name: savedData.name,
+            matched_ledger_name: savedData.name,
+            gstin: savedData.gstin,
+            pan: savedData.pan,
+            state: savedData.state,
+            pincode: savedData.pincode,
+            address: savedData.address_lines.join(', '),
+            registration_type: savedData.registration_type,
+            parent_group: savedData.parent_group,
+            saved_draft_version: savedData.saved_draft_version || 1,
             requires_ledger_creation: false,
             mapping_status: 'AUTO_MAPPED',
             mapping_confidence: 'HIGH',
@@ -1480,10 +1501,9 @@ export default function SalesPage() {
         }));
       }
 
-      showAlert('Customer Ledger Created', `Customer Ledger "${newLedgerData.name.trim()}" created successfully!`, 'success');
+      showAlert('Customer Ledger Created', `Customer Ledger "${savedData.name}" created and verified in Tally masters!`, 'success');
       loadMasters();
       setIsNewLedgerModalOpen(false);
-      setNewLedgerData({ name: '', group: 'Sundry Debtors', gstin: '', state: '' });
     } catch (err: any) {
       showAlert('Failed to Create Ledger', `Failed to create ledger: ${err.message}`, 'error');
     }
@@ -3831,68 +3851,32 @@ export default function SalesPage() {
         onUseExistingItem={handleUseExistingStockItem}
       />
 
-      {/* MODAL: CREATE NEW CUSTOMER LEDGER */}
-      <Modal
+      {/* SMART CREATE CUSTOMER LEDGER MASTER MODAL (PRD Addendum 6) */}
+      <CreateLedgerMasterModal
         isOpen={isNewLedgerModalOpen}
         onClose={() => setIsNewLedgerModalOpen(false)}
-        title="Create Customer Ledger in Tally"
-        size="md"
-      >
-        <form onSubmit={handleCreateNewLedgerSubmit} className="space-y-4 text-xs">
-          <p className="text-slate-600">
-            Create a Customer Ledger indexed in Tally masters under <code className="bg-slate-100 px-1 py-0.5 rounded font-mono">Sundry Debtors</code>.
-          </p>
-
-          <div>
-            <label className="block font-semibold text-slate-700 mb-1">Customer / Ledger Name *</label>
-            <Input
-              value={newLedgerData.name}
-              onChange={(e) => setNewLedgerData({ ...newLedgerData, name: e.target.value })}
-              required
-              className="text-xs font-bold"
-            />
-          </div>
-
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block font-semibold text-slate-700 mb-1">Customer GSTIN</label>
-              <Input
-                value={newLedgerData.gstin}
-                onChange={(e) => setNewLedgerData({ ...newLedgerData, gstin: e.target.value.toUpperCase() })}
-                placeholder="15 digits"
-                className="text-xs font-mono uppercase"
-              />
-            </div>
-            <div>
-              <label className="block font-semibold text-slate-700 mb-1">State</label>
-              <Input
-                value={newLedgerData.state}
-                onChange={(e) => setNewLedgerData({ ...newLedgerData, state: e.target.value })}
-                placeholder="State"
-                className="text-xs"
-              />
-            </div>
-          </div>
-
-          <div>
-            <label className="block font-semibold text-slate-700 mb-1">Under Group</label>
-            <Input
-              value={newLedgerData.group}
-              onChange={(e) => setNewLedgerData({ ...newLedgerData, group: e.target.value })}
-              className="text-xs"
-            />
-          </div>
-
-          <div className="flex justify-end gap-2 pt-3 border-t border-slate-100">
-            <Button variant="outline" size="sm" type="button" onClick={() => setIsNewLedgerModalOpen(false)}>
-              Cancel
-            </Button>
-            <Button variant="primary" size="sm" type="submit" className="font-bold">
-              Save & Map Customer
-            </Button>
-          </div>
-        </form>
-      </Modal>
+        party={currentInvoice ? {
+          name: currentInvoice.buyer.name,
+          alias: (currentInvoice.buyer as any).alias,
+          gstin: currentInvoice.buyer.gstin,
+          pan: (currentInvoice.buyer as any).pan,
+          address: currentInvoice.buyer.address,
+          state: currentInvoice.buyer.state,
+          pincode: (currentInvoice.buyer as any).pincode,
+          country: (currentInvoice.buyer as any).country,
+          registration_type: (currentInvoice.buyer as any).registration_type,
+          parent_group: 'Sundry Debtors',
+          saved_draft_version: (currentInvoice.buyer as any).saved_draft_version,
+        } : null}
+        initialInvoiceValues={currentInvoice ? {
+          name: currentInvoice.buyer.name,
+          gstin: currentInvoice.buyer.gstin,
+          state: currentInvoice.buyer.state,
+          address: currentInvoice.buyer.address,
+        } : null}
+        defaultParentGroup="Sundry Debtors"
+        onSaveMaster={handleSaveLedgerMaster}
+      />
 
       {/* MODAL: XML PREVIEW */}
       <Modal

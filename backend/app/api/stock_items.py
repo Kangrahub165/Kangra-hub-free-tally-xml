@@ -13,6 +13,12 @@ from app.accounting.stock_item_importer import (
     StockItemImportResult,
     StockItemMatchSuggestion
 )
+from app.accounting.tally_master_generator import (
+    StockItemDraft,
+    generate_stock_item_master_xml,
+    verify_stock_item_round_trip,
+    parse_stock_item_master_xml
+)
 
 router = APIRouter(prefix="/stock-items", tags=["Stock Items"])
 
@@ -27,6 +33,19 @@ def resolve_user_id(request: Request) -> str:
 class CreateStockItemRequest(BaseModel):
     name: str
     hsn: Optional[str] = None
+    hsn_description: Optional[str] = None
+    uom: Optional[str] = "NOS"
+    parent_group: Optional[str] = "Primary"
+    gst_rate: Optional[float] = None
+    taxability: Optional[str] = "Taxable"
+    type_of_supply: Optional[str] = "Goods"
+    additional_units: Optional[str] = None
+    conversion: Optional[float] = None
+
+class StockItemPreviewRequest(BaseModel):
+    name: str
+    hsn: Optional[str] = None
+    hsn_description: Optional[str] = None
     uom: Optional[str] = "NOS"
     parent_group: Optional[str] = "Primary"
     gst_rate: Optional[float] = None
@@ -152,6 +171,45 @@ async def create_new_stock_item_xml_endpoint(
         "item": item,
         "xml_snippet": xml_snippet
     }
+
+@router.post("/tally-preview")
+async def stock_item_tally_preview_endpoint(body: StockItemPreviewRequest):
+    """
+    PRD Addendum 6: 'How it will look in Tally' preview.
+    Generates XML and parses directly from the XML snippet so the preview reflects what Tally gets.
+    """
+    if not body.name or not body.name.strip():
+        raise HTTPException(status_code=400, detail="Stock item name cannot be empty.")
+
+    try:
+        conv_val = int(body.conversion) if body.conversion and body.conversion >= 1 else None
+        draft = StockItemDraft(
+            name=body.name.strip(),
+            parent_group=body.parent_group or "Primary",
+            base_unit=body.uom or "NOS",
+            alternate_unit=body.additional_units,
+            conversion=conv_val,
+            hsn_code=body.hsn,
+            hsn_description=body.hsn_description,
+            gst_rate=Decimal(str(body.gst_rate)) if body.gst_rate is not None else Decimal("0.00"),
+            taxability=body.taxability or "Taxable",
+            type_of_supply=body.type_of_supply or "Goods"
+        )
+        xml_str = generate_stock_item_master_xml(draft)
+        verify_stock_item_round_trip(draft, xml_str)
+        preview = parse_stock_item_master_xml(xml_str)
+        # Convert Decimal values to float for JSON response
+        preview["gst_rate"] = float(preview["gst_rate"])
+        preview["cgst_rate"] = float(preview["cgst_rate"])
+        preview["sgst_rate"] = float(preview["sgst_rate"])
+        return {
+            "success": True,
+            "preview": preview,
+            "xml_snippet": xml_str
+        }
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
 
 class ExportMasterXmlRequest(BaseModel):
     company_name: Optional[str] = "Kartar Singh & Sons - (from 1-Apr-25)"
