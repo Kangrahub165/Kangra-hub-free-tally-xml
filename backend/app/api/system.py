@@ -6,7 +6,7 @@ from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
-ADMIN_LOGIN_EMAIL = "admin@tallyxml.in"
+ADMIN_LOGIN_EMAIL = "admin@kangrahub.sales"
 ADMIN_RECOVERY_EMAIL = "kangrahub@gmail.com"
 
 router = APIRouter(prefix="/system", tags=["System"])
@@ -14,7 +14,9 @@ router = APIRouter(prefix="/system", tags=["System"])
 class PublicSettingsResponse(BaseModel):
     site_name: str
     site_mode: str  # "FREE" or "PAID"
-    free_daily_page_limit: int
+    free_daily_page_limit: int = 5
+    free_daily_bill_limit: int = 5
+    free_daily_limit: int = 5
     maintenance_mode: bool
     allow_new_signups: bool
     max_upload_size_mb: int
@@ -26,7 +28,9 @@ async def get_public_settings():
     return PublicSettingsResponse(
         site_name=settings.app_name,
         site_mode=settings.site_mode,
-        free_daily_page_limit=settings.free_daily_page_limit,
+        free_daily_page_limit=settings.free_daily_bill_limit,
+        free_daily_bill_limit=settings.free_daily_bill_limit,
+        free_daily_limit=settings.free_daily_bill_limit,
         maintenance_mode=settings.maintenance_mode,
         allow_new_signups=settings.allow_new_signups,
         max_upload_size_mb=settings.max_upload_size_mb,
@@ -204,14 +208,14 @@ async def admin_forgot_password(payload: AdminForgotPasswordRequest):
     email = payload.email.lower().strip()
 
     # 1. Require Supabase configuration - Fail immediately if missing
-    if not (settings.supabase_url and settings.supabase_anon_key):
+    if not SupabaseService.is_configured():
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Supabase authentication service is not configured on the server. Please configure SUPABASE_URL and SUPABASE_ANON_KEY in backend/.env."
+            detail="Supabase authentication service is not configured on the server. Please configure SUPABASE_URL and SUPABASE_SECRET_KEY in backend/.env."
         )
 
     # 2. Validate email against database / authoritative admin config
-    admin_email = getattr(settings, "admin_email", "admin@tallyxml.in").lower().strip()
+    admin_email = getattr(settings, "admin_email", "admin@kangrahub.sales").lower().strip()
     recovery_email = getattr(settings, "admin_recovery_email", "kangrahub@gmail.com")
     is_valid_admin = (email == admin_email)
     
@@ -220,7 +224,7 @@ async def admin_forgot_password(payload: AdminForgotPasswordRequest):
             from supabase import create_client
             db_client = create_client(
                 settings.supabase_url,
-                settings.supabase_service_role_key or settings.supabase_anon_key
+                settings.supabase_secret_key or settings.supabase_service_role_key or settings.supabase_anon_key or settings.supabase_publishable_key
             )
             p_res = db_client.table("profiles").select("role, user_id").eq("email", email).single().execute()
             if p_res.data and p_res.data.get("role") in ("ADMIN", "SUPER_ADMIN"):

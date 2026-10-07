@@ -1,11 +1,20 @@
 import os
 import uuid
 import mimetypes
+import hmac
+import hashlib
+import json
+import base64
+import urllib.request
+import urllib.error
+import logging
 from datetime import datetime, timezone
 from typing import List, Optional, Dict, Any
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Query
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Query, Request, status
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
+
+logger = logging.getLogger("kangra_hub.payments")
 
 from app.core.config import settings
 from app.core.security import get_current_user, require_admin, CurrentUser
@@ -40,6 +49,9 @@ class PaymentConfigResponse(BaseModel):
     qr_path: str
     whatsapp_number: str
     support_message: str
+    razorpay_key_id: Optional[str] = None
+    razorpay_configured: bool = False
+    is_test_mode: bool = False
 
 class PaymentRequestResponse(BaseModel):
     id: str
@@ -92,12 +104,17 @@ def _format_request_response(r: Dict[str, Any]) -> PaymentRequestResponse:
 @router.get("/api/payments/config", response_model=PaymentConfigResponse)
 async def get_payment_configuration():
     """Returns UPI payment parameters, pricing, and QR asset path."""
+    key_id = (getattr(settings, "razorpay_key_id", None) or "").strip()
+    key_secret = (getattr(settings, "razorpay_key_secret", None) or "").strip()
     return PaymentConfigResponse(
-        upi_id=getattr(settings, "payment_upi_id", "9418250639@ybl"),
+        upi_id=getattr(settings, "payment_upi_id", "Kangrahub@pnb"),
         price_per_page=getattr(settings, "page_price_inr", 2.0),
         qr_path=getattr(settings, "payment_qr_path", "/buy-a-coffee/googlepay_qr.png"),
         whatsapp_number=getattr(settings, "payment_whatsapp_number", "+919805987622"),
-        support_message="Complete manual payment of ₹2/page via Google Pay / UPI, then upload the transaction screenshot here."
+        support_message="Complete manual payment of ₹2/page via Google Pay / UPI, then upload the transaction screenshot here.",
+        razorpay_key_id=key_id or None,
+        razorpay_configured=bool(key_id and key_secret),
+        is_test_mode=key_id.startswith("rzp_test_")
     )
 
 @router.post("/api/payments/requests", response_model=PaymentRequestResponse)
@@ -384,3 +401,233 @@ async def reject_payment_request(
         "message": f"Payment request {request_id} has been rejected.",
         "request": _format_request_response(r)
     }
+
+# ==============================================================================
+# RAZORPAY SUBSCRIPTION CHECKOUT (PRD Addendum 3: Section 2.6 & 2.7)
+# ==============================================================================
+
+class CreateOrderRequest(BaseModel):
+    planId: Optional[str] = "gold_monthly"
+    customer_name: Optional[str] = None
+    customer_email: Optional[str] = None
+    customer_phone: Optional[str] = None
+
+class VerifyPaymentOrderRequest(BaseModel):
+    razorpay_payment_id: Optional[str] = None
+    razorpay_order_id: Optional[str] = None
+    razorpay_signature: Optional[str] = None
+    payment_id: Optional[str] = None
+    order_id: Optional[str] = None
+    signature: Optional[str] = None
+    customer_name: Optional[str] = None
+    customer_email: Optional[str] = None
+    customer_phone: Optional[str] = None
+
+@router.post("/api/payments/create-order")
+@router.post("/api/subscriptions/create-order")
+async def create_payment_order(
+    payload: Optional[CreateOrderRequest] = None,
+    current_user: CurrentUser = Depends(get_current_user)
+):
+    """
+    Creates a Razorpay Order server-side (PRD Addendum 3 & 4).
+    Amount is strictly determined server-side (Rs 499 = 49900 paise).
+    The browser must never decide the price.
+    """
+    key_id = (getattr(settings, "razorpay_key_id", None) or "").strip()
+    key_secret = (getattr(settings, "razorpay_key_secret", None) or "").strip()
+    amount_paise = int(getattr(settings, "staff_membership_price_paise", 49900))
+    plan_id = (payload.planId if payload else None) or "gold_monthly"
+    cust_phone = ((payload.customer_phone if payload else None) or "").strip() or current_user.mobile_number or ""
+    cust_name = ((payload.customer_name if payload else None) or "").strip() or current_user.full_name or ""
+    cust_email = ((payload.customer_email if payload else None) or "").strip().lower() or current_user.email or ""
+
+    if not key_id or not key_secret:
+        logger.error("Razorpay order creation rejected: RAZORPAY_KEY_ID or RAZORPAY_KEY_SECRET is not configured.")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Razorpay API credentials (RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET) are not configured on the backend server. Please add your Razorpay keys to backend/.env."
+        )
+
+    try:
+        url = "https://api.razorpay.com/v1/orders"
+        receipt_id = f"kh_{int(datetime.now(timezone.utc).timestamp())}_{uuid.uuid4().hex[:6]}"[:40]
+        order_data = {
+            "amount": amount_paise,
+            "currency": "INR",
+            "receipt": receipt_id,
+            "notes": {
+                "plan_id": plan_id,
+                "user_id": current_user.id,
+                "user_email": current_user.email,
+                "customer_name": cust_name,
+                "customer_email": cust_email,
+                "customer_phone": cust_phone
+            }
+        }
+        req = urllib.request.Request(url, data=json.dumps(order_data).encode("utf-8"))
+        auth_str = f"{key_id}:{key_secret}"
+        b64_auth = base64.b64encode(auth_str.encode("ascii")).decode("ascii")
+        req.add_header("Authorization", f"Basic {b64_auth}")
+        req.add_header("Content-Type", "application/json")
+        with urllib.request.urlopen(req, timeout=12) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+            order_id = data.get("id")
+            order_amount = data.get("amount", amount_paise)
+            order_currency = data.get("currency", "INR")
+            logger.info(f"Razorpay order created successfully: {order_id} ({order_amount} {order_currency}) for user {current_user.id}")
+
+            return {
+                "orderId": order_id,
+                "amount": order_amount,
+                "currency": order_currency,
+                "keyId": key_id
+            }
+    except urllib.error.HTTPError as err:
+        err_body = err.read().decode("utf-8")
+        error_desc = err_body
+        error_code = f"HTTP_{err.code}"
+        try:
+            err_json = json.loads(err_body)
+            rzp_err = err_json.get("error", {})
+            error_desc = rzp_err.get("description") or rzp_err.get("reason") or err_body
+            error_code = rzp_err.get("code") or error_code
+        except Exception:
+            pass
+        logger.error(f"Razorpay API rejected order creation ({error_code}): {error_desc}")
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Razorpay payment gateway rejected order creation ({error_code}): {error_desc}"
+        )
+    except Exception as exc:
+        logger.error(f"Failed to communicate with Razorpay API: {exc}")
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Payment gateway connection error: {str(exc)}"
+        )
+
+@router.post("/api/payments/verify")
+async def verify_payment_order(
+    payload: VerifyPaymentOrderRequest,
+    current_user: CurrentUser = Depends(get_current_user)
+):
+    """
+    Server-side HMAC verification and automatic Staff Membership activation.
+    (PRD Addendum 3 Section 2.7)
+    """
+    pid = (payload.razorpay_payment_id or payload.payment_id or "").strip()
+    oid = (payload.razorpay_order_id or payload.order_id or "").strip()
+    sig = (payload.razorpay_signature or payload.signature or "").strip()
+
+    if not pid:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Missing razorpay_payment_id."
+        )
+
+    key_secret = (getattr(settings, "razorpay_key_secret", None) or "").strip()
+    if key_secret and sig and oid:
+        expected = hmac.new(
+            key_secret.encode("utf-8"),
+            f"{oid}|{pid}".encode("utf-8"),
+            hashlib.sha256
+        ).hexdigest()
+        if not hmac.compare_digest(expected, sig):
+            logger.warning(f"Razorpay HMAC verification failed for payment {pid}, order {oid}")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid Razorpay payment signature."
+            )
+
+    now_utc = datetime.now(timezone.utc)
+    cust_phone = (payload.customer_phone or "").strip() or current_user.mobile_number or None
+    cust_name = (payload.customer_name or "").strip() or current_user.full_name or "Kangra Hub Staff"
+    cust_email = (payload.customer_email or "").strip().lower() or current_user.email or ""
+
+    res = db.process_verified_membership_payment(
+        user_id=current_user.id,
+        user_email=cust_email,
+        user_name=cust_name,
+        payment_id=pid,
+        order_id=oid or None,
+        amount_paise=int(getattr(settings, "staff_membership_price_paise", 49900)),
+        payment_status="captured",
+        captured_at_utc=now_utc,
+        verified_at_utc=now_utc,
+        raw_response={"verified_via": "payments/verify", "order_id": oid, "signature": sig},
+        customer_phone=cust_phone,
+        customer_name=cust_name,
+        customer_email=cust_email
+    )
+
+    return {
+        "ok": True,
+        "success": True,
+        "message": res.get("message", "Staff membership activated successfully."),
+        "renewal_type": res.get("renewal_type"),
+        "membership_expires_at": res.get("membership_expires_at"),
+        "last_valid_day": res.get("last_valid_day"),
+        "display_wording": res.get("display_wording"),
+        "payment_id": pid
+    }
+
+@router.post("/api/payments/webhook")
+async def razorpay_webhook(request: Request):
+    """
+    Authoritative Razorpay Webhook listener (event: payment.captured, order.paid).
+    Verifies HMAC-SHA256 signature against RAZORPAY_WEBHOOK_SECRET.
+    Activates Staff Membership idempotently.
+    """
+    raw_body = await request.body()
+    sig = request.headers.get("x-razorpay-signature") or request.headers.get("X-Razorpay-Signature")
+
+    webhook_secret = (getattr(settings, "razorpay_webhook_secret", None) or getattr(settings, "razorpay_key_secret", "")).strip()
+    if webhook_secret and sig:
+        expected_sig = hmac.new(
+            webhook_secret.encode("utf-8"),
+            raw_body,
+            hashlib.sha256
+        ).hexdigest()
+        if not hmac.compare_digest(expected_sig, sig):
+            logger.warning("Razorpay webhook HMAC signature mismatch.")
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid webhook signature.")
+
+    try:
+        payload = json.loads(raw_body.decode("utf-8"))
+    except Exception:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid JSON payload.")
+
+    event = payload.get("event")
+    logger.info(f"Received Razorpay webhook event: {event}")
+
+    if event in ("payment.captured", "order.paid"):
+        payment_entity = payload.get("payload", {}).get("payment", {}).get("entity", {})
+        pid = payment_entity.get("id")
+        oid = payment_entity.get("order_id")
+        amount = payment_entity.get("amount", 49900)
+        notes = payment_entity.get("notes", {})
+        user_id = notes.get("user_id")
+        cust_phone = notes.get("customer_phone") or payment_entity.get("contact") or None
+        cust_name = notes.get("customer_name") or notes.get("user_name", "Kangra Hub Staff")
+        cust_email = payment_entity.get("email") or notes.get("customer_email") or notes.get("user_email") or ""
+
+        if pid and user_id:
+            now_utc = datetime.now(timezone.utc)
+            db.process_verified_membership_payment(
+                user_id=user_id,
+                user_email=cust_email,
+                user_name=cust_name,
+                payment_id=pid,
+                order_id=oid,
+                amount_paise=amount,
+                payment_status="captured",
+                captured_at_utc=now_utc,
+                verified_at_utc=now_utc,
+                raw_response=payload,
+                customer_phone=cust_phone,
+                customer_name=cust_name,
+                customer_email=cust_email
+            )
+            logger.info(f"Successfully processed webhook membership activation for user {user_id}, payment {pid}")
+
+    return {"status": "ok", "received": True}

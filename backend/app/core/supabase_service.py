@@ -15,11 +15,27 @@ class SupabaseService:
 
     @staticmethod
     def is_configured() -> bool:
-        return bool(settings.supabase_url and (settings.supabase_anon_key or settings.supabase_service_role_key))
+        return bool(
+            settings.supabase_url and (
+                settings.supabase_secret_key
+                or settings.supabase_service_role_key
+                or settings.supabase_anon_key
+                or settings.supabase_publishable_key
+            )
+        )
 
     @staticmethod
     def get_api_key() -> str:
-        return settings.supabase_anon_key or settings.supabase_service_role_key
+        return (
+            settings.supabase_secret_key
+            or settings.supabase_service_role_key
+            or settings.supabase_anon_key
+            or settings.supabase_publishable_key
+        )
+
+    @staticmethod
+    def get_service_key() -> str:
+        return settings.supabase_secret_key or settings.supabase_service_role_key
 
     @classmethod
     def sign_in_with_password(cls, email: str, password: str) -> Dict[str, Any]:
@@ -82,6 +98,86 @@ class SupabaseService:
             raise RuntimeError(str(exc))
 
     @classmethod
+    def verify_email_otp(cls, email: str, token: str) -> Dict[str, Any]:
+        """
+        Verifies the Email OTP with Supabase Auth directly via /auth/v1/verify.
+        Tries verification with type 'signup' first, falling back to 'email'.
+        """
+        if not cls.is_configured():
+            raise RuntimeError("Supabase authentication is not configured.")
+
+        url = f"{settings.supabase_url.rstrip('/')}/auth/v1/verify"
+        clean_email = email.strip().lower()
+        clean_token = token.strip()
+        headers = {
+            "apikey": cls.get_api_key(),
+            "Content-Type": "application/json"
+        }
+
+        last_error = "That verification code is incorrect or expired. Please check your email and try again."
+        for verify_type in ("signup", "email"):
+            payload = json.dumps({
+                "type": verify_type,
+                "email": clean_email,
+                "token": clean_token
+            }).encode("utf-8")
+            req = urllib.request.Request(url, data=payload, headers=headers, method="POST")
+            try:
+                with urllib.request.urlopen(req) as res:
+                    return json.loads(res.read().decode("utf-8"))
+            except urllib.error.HTTPError as err:
+                err_body = err.read().decode("utf-8")
+                try:
+                    err_json = json.loads(err_body)
+                    error_msg = err_json.get("msg") or err_json.get("error_description") or err_json.get("message") or err_body
+                except Exception:
+                    error_msg = err_body
+                last_error = error_msg
+            except Exception as exc:
+                last_error = str(exc)
+
+        raise RuntimeError(last_error)
+
+    @classmethod
+    def resend_signup_email_otp(cls, email: str) -> Dict[str, Any]:
+        """
+        Dispatches a fresh Email OTP via Supabase Auth /auth/v1/resend.
+        """
+        if not cls.is_configured():
+            raise RuntimeError("Supabase authentication is not configured.")
+
+        url = f"{settings.supabase_url.rstrip('/')}/auth/v1/resend"
+        clean_email = email.strip().lower()
+        headers = {
+            "apikey": cls.get_api_key(),
+            "Content-Type": "application/json"
+        }
+
+        last_error = "Unable to resend verification email."
+        for resend_type in ("signup", "email"):
+            payload = json.dumps({
+                "type": resend_type,
+                "email": clean_email
+            }).encode("utf-8")
+            req = urllib.request.Request(url, data=payload, headers=headers, method="POST")
+            try:
+                with urllib.request.urlopen(req) as res:
+                    body = res.read().decode("utf-8")
+                    return json.loads(body) if body else {"success": True}
+            except urllib.error.HTTPError as err:
+                err_body = err.read().decode("utf-8")
+                try:
+                    err_json = json.loads(err_body)
+                    error_msg = err_json.get("msg") or err_json.get("error_description") or err_json.get("message") or err_body
+                except Exception:
+                    error_msg = err_body
+                last_error = error_msg
+            except Exception as exc:
+                last_error = str(exc)
+
+        raise RuntimeError(last_error)
+
+    @classmethod
     def refresh_session(cls, refresh_token: str) -> Dict[str, Any]:
         """Refreshes session token via Supabase Auth."""
         if not cls.is_configured():
@@ -108,6 +204,46 @@ class SupabaseService:
             raise RuntimeError(error_msg)
         except Exception as exc:
             raise RuntimeError(str(exc))
+
+    @classmethod
+    def get_auth_user_by_email(cls, email: str) -> Optional[Dict[str, Any]]:
+        """
+        Authoritatively queries Supabase Auth Admin API for a user by email address.
+        Returns the user dict if found in Supabase Auth, or None if the email is not registered.
+        """
+        if not cls.is_configured():
+            return None
+
+        clean_email = email.strip().lower()
+        service_key = cls.get_service_key()
+        if not service_key:
+            return None
+
+        # Supabase GoTrue Auth admin users endpoint: /auth/v1/admin/users
+        page = 1
+        per_page = 500
+        while True:
+            url = f"{settings.supabase_url.rstrip('/')}/auth/v1/admin/users?page={page}&per_page={per_page}"
+            headers = {
+                "apikey": service_key,
+                "Authorization": f"Bearer {service_key}"
+            }
+            try:
+                req = urllib.request.Request(url, headers=headers, method="GET")
+                with urllib.request.urlopen(req) as res:
+                    data = json.loads(res.read().decode("utf-8"))
+                    users = data.get("users", [])
+                    for u in users:
+                        if (u.get("email") or "").strip().lower() == clean_email:
+                            return u
+                    if len(users) < per_page:
+                        break
+                    page += 1
+            except Exception as exc:
+                logger.warning(f"Unable to query Supabase Auth admin users for {clean_email}: {exc}")
+                break
+
+        return None
 
     @classmethod
     def get_user(cls, access_token: str) -> Dict[str, Any]:
@@ -320,14 +456,15 @@ class SupabaseService:
         except Exception as exc:
             logger.warning(f"Unable to update profile email for {user_id}: {exc}")
 
-        # Try admin auth update if service role is available
-        if settings.supabase_service_role_key:
+        # Try admin auth update if secret / service role key is available
+        service_key = cls.get_service_key()
+        if service_key:
             try:
                 url_auth = f"{settings.supabase_url.rstrip('/')}/auth/v1/admin/users/{user_id}"
                 auth_payload = json.dumps({"email": clean_email, "email_confirm": True}).encode("utf-8")
                 auth_headers = {
-                    "apikey": settings.supabase_service_role_key,
-                    "Authorization": f"Bearer {settings.supabase_service_role_key}",
+                    "apikey": service_key,
+                    "Authorization": f"Bearer {service_key}",
                     "Content-Type": "application/json"
                 }
                 auth_req = urllib.request.Request(url_auth, data=auth_payload, headers=auth_headers, method="PUT")

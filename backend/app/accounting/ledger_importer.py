@@ -4,6 +4,7 @@ import xml.etree.ElementTree as ET
 from html.parser import HTMLParser
 from decimal import Decimal, InvalidOperation
 from typing import List, Dict, Optional, Tuple, Any
+from difflib import SequenceMatcher
 from pydantic import BaseModel, Field
 
 class ImportedGroup(BaseModel):
@@ -89,8 +90,9 @@ class _SafeHTMLTableParser(HTMLParser):
             self.current_cell.append(data)
 
 def normalize_ledger_name(name: str) -> str:
-    """Normalizes whitespace and converts to uppercase for comparison."""
-    return " ".join(name.strip().split()).upper()
+    """Normalizes whitespace, strips financial year suffixes like (2026-2027), and converts to uppercase for comparison."""
+    cleaned = re.sub(r'\s*\((?:20)?\d{2}[-\/](?:20)?\d{2}\)', '', name, flags=re.IGNORECASE)
+    return " ".join(cleaned.strip().split()).upper()
 
 def detect_ledger_format(content: str, filename: Optional[str] = None) -> str:
     """
@@ -138,6 +140,31 @@ def sanitize_xml_content(content: str) -> str:
     # 3. Strip raw control characters (preserve newline \n, carriage return \r, tab \t)
     sanitized = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f]', '', sanitized)
     return sanitized
+
+def decode_ledger_file(contents: bytes) -> str:
+    """
+    Decodes file bytes safely handling UTF-16LE, UTF-16BE, UTF-8-BOM, UTF-8, UTF-16, and Latin-1.
+    Tally exports large master XML files in UTF-16LE with BOM (0xFF 0xFE).
+    """
+    if contents.startswith(b'\xff\xfe'):
+        return contents.decode('utf-16le', errors='replace')
+    elif contents.startswith(b'\xfe\xff'):
+        return contents.decode('utf-16be', errors='replace')
+    elif contents.startswith(b'\xef\xbb\xbf'):
+        return contents.decode('utf-8-sig', errors='replace')
+
+    try:
+        return contents.decode('utf-8')
+    except UnicodeDecodeError:
+        pass
+
+    if len(contents) > 4 and (contents[1:2] == b'\x00' or contents[0:1] == b'\x00'):
+        try:
+            return contents.decode('utf-16', errors='replace')
+        except UnicodeDecodeError:
+            pass
+
+    return contents.decode('latin-1')
 
 def parse_xml_masters(content: str) -> Tuple[List[ImportedLedger], List[ImportedGroup], int, List[str]]:
     """
@@ -489,7 +516,10 @@ class UserLedgerStore:
         self._user_groups: Dict[str, Dict[str, ImportedGroup]] = {}
 
     def get_user_ledgers(self, user_id: str) -> List[ImportedLedger]:
-        return list(self._user_stores.get(user_id, {}).values())
+        store = dict(self._user_stores.get("default_session", {}))
+        if user_id != "default_session" and user_id in self._user_stores:
+            store.update(self._user_stores[user_id])
+        return list(store.values())
 
     def get_bank_ledgers(self, user_id: str) -> List[ImportedLedger]:
         """Returns only bank account ledgers from the user's chart of accounts."""
@@ -528,7 +558,10 @@ class UserLedgerStore:
         return cash_ledgers
 
     def get_user_groups(self, user_id: str) -> List[ImportedGroup]:
-        return list(self._user_groups.get(user_id, {}).values())
+        groups = dict(self._user_groups.get("default_session", {}))
+        if user_id != "default_session" and user_id in self._user_groups:
+            groups.update(self._user_groups[user_id])
+        return list(groups.values())
 
     def add_groups(self, user_id: str, groups: List[ImportedGroup]) -> int:
         if user_id not in self._user_groups:
@@ -563,7 +596,14 @@ class UserLedgerStore:
                 self._user_stores[user_id][l.normalized_name] = l
         return len(self._user_stores[user_id])
 
-    def add_single_ledger(self, user_id: str, name: str, group: Optional[str] = "Primary") -> ImportedLedger:
+    def add_single_ledger(
+        self,
+        user_id: str,
+        name: str,
+        group: Optional[str] = "Primary",
+        party_gstin: Optional[str] = None,
+        state: Optional[str] = None
+    ) -> ImportedLedger:
         clean_name = " ".join(name.strip().split())
         norm = normalize_ledger_name(clean_name)
         ledger = ImportedLedger(
@@ -571,6 +611,8 @@ class UserLedgerStore:
             normalized_name=norm,
             group=group or "Primary",
             parent_group=group or "Primary",
+            party_gstin=party_gstin.strip().upper() if party_gstin else None,
+            state=state.strip() if state else None,
             source_format="MANUAL"
         )
         if user_id not in self._user_stores:
@@ -586,7 +628,9 @@ class UserLedgerStore:
         return False
 
     def search_ledgers(self, user_id: str, query: str, limit: Optional[int] = None) -> List[ImportedLedger]:
-        store = self._user_stores.get(user_id, {})
+        store = dict(self._user_stores.get("default_session", {}))
+        if user_id != "default_session" and user_id in self._user_stores:
+            store.update(self._user_stores[user_id])
         if not query or not query.strip():
             items = list(store.values())
             return items[:limit] if limit else items
@@ -616,6 +660,137 @@ class UserLedgerStore:
         results.sort(key=lambda x: x[0])
         matched = [r[1] for r in results]
         return matched[:limit] if limit else matched
+
+    def match_ledger(
+        self,
+        user_id: str,
+        query_name: str,
+        gstin: Optional[str] = None,
+        pan: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        Intelligently matches extracted party/ledger against imported Tally ledgers.
+        Prioritizes exact GSTIN, normalized names, aliases, and fuzzy similarity.
+        """
+        store = dict(self._user_stores.get("default_session", {}))
+        if user_id != "default_session" and user_id in self._user_stores:
+            store.update(self._user_stores[user_id])
+
+        if not store or not query_name:
+            return {
+                "party_name": query_name,
+                "matched_ledger_name": None,
+                "similarity_score": 0.0,
+                "confidence": "UNMATCHED",
+                "mapping_status": "UNMATCHED",
+                "suggestions": []
+            }
+
+        q_norm = normalize_ledger_name(query_name)
+        q_gstin = (gstin or "").strip().upper()
+
+        # 1. Exact GSTIN match (Very strong signal!)
+        if q_gstin:
+            for l in store.values():
+                if l.party_gstin and l.party_gstin.strip().upper() == q_gstin:
+                    return {
+                        "party_name": query_name,
+                        "matched_ledger_name": l.name,
+                        "similarity_score": 100.0,
+                        "confidence": "HIGH",
+                        "mapping_status": "AUTO_MAPPED",
+                        "suggestions": [{
+                            "name": l.name,
+                            "similarity_score": 100.0,
+                            "confidence": "HIGH",
+                            "party_gstin": l.party_gstin,
+                            "group": l.group
+                        }]
+                    }
+
+        # 2. Exact or Normalized match
+        if q_norm in store:
+            l = store[q_norm]
+            return {
+                "party_name": query_name,
+                "matched_ledger_name": l.name,
+                "similarity_score": 100.0,
+                "confidence": "HIGH",
+                "mapping_status": "AUTO_MAPPED",
+                "suggestions": [{
+                    "name": l.name,
+                    "similarity_score": 100.0,
+                    "confidence": "HIGH",
+                    "party_gstin": l.party_gstin,
+                    "group": l.group
+                }]
+            }
+
+        # 3. Fuzzy match + aliases + controlled substring
+        ranked = []
+        for l in store.values():
+            s = SequenceMatcher(None, q_norm, l.normalized_name).ratio()
+            for a in l.aliases:
+                a_s = SequenceMatcher(None, q_norm, normalize_ledger_name(a)).ratio()
+                if a_s > s:
+                    s = a_s
+            min_len = min(len(q_norm), len(l.normalized_name))
+            max_len = max(len(q_norm), len(l.normalized_name))
+            if min_len >= 6 and (min_len / max_len) >= 0.75:
+                if q_norm in l.normalized_name or l.normalized_name in q_norm:
+                    s = max(s, 0.85)
+            ranked.append((s, l))
+
+        ranked.sort(key=lambda x: x[0], reverse=True)
+        suggestions = []
+        for s, l in ranked[:3]:
+            conf = "HIGH" if s >= 0.94 else ("MEDIUM" if s >= 0.65 else "LOW")
+            suggestions.append({
+                "name": l.name,
+                "similarity_score": round(s * 100, 1),
+                "confidence": conf,
+                "party_gstin": l.party_gstin,
+                "group": l.group
+            })
+
+        best_score, best_l = ranked[0] if ranked else (0.0, None)
+        if best_score >= 0.94:
+            return {
+                "party_name": query_name,
+                "matched_ledger_name": best_l.name,
+                "similarity_score": round(best_score * 100, 1),
+                "confidence": "HIGH",
+                "mapping_status": "AUTO_MAPPED",
+                "suggestions": suggestions
+            }
+        elif best_score >= 0.65:
+            # Conservative principle: Never silently auto-replace extracted party name with unrelated ledger.
+            return {
+                "party_name": query_name,
+                "matched_ledger_name": None,
+                "similarity_score": round(best_score * 100, 1),
+                "confidence": "MEDIUM",
+                "mapping_status": "PLEASE_CHECK",
+                "suggestions": suggestions
+            }
+        elif best_score >= 0.40:
+            return {
+                "party_name": query_name,
+                "matched_ledger_name": None,
+                "similarity_score": round(best_score * 100, 1),
+                "confidence": "LOW",
+                "mapping_status": "POSSIBLE_MATCH",
+                "suggestions": suggestions
+            }
+        else:
+            return {
+                "party_name": query_name,
+                "matched_ledger_name": None,
+                "similarity_score": 0.0,
+                "confidence": "UNMATCHED",
+                "mapping_status": "UNMATCHED",
+                "suggestions": suggestions
+            }
 
     def clear(self, user_id: str):
         if user_id in self._user_stores:

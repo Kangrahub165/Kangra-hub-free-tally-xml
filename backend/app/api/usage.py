@@ -96,14 +96,19 @@ class UserUsageResponse(BaseModel):
     pages_used_today: int
     pages_remaining_today: int
     additional_page_balance: int = 0
-    total_allowed_pages: int = 50
-    price_per_page: float = 2.0
+    total_allowed_pages: int = 5
+    price_per_page: float = 0.0
+    # Bill-specific quota fields (Subscription-only model: ₹10 per bill deprecated)
+    bills_used_today: int = 0
+    bills_remaining_today: int = 5
+    additional_bill_balance: int = 0
+    price_per_bill: float = 0.0
     is_unlimited: bool
     account_status: str
     quota_mode: str = "GLOBAL"  # "GLOBAL" | "CUSTOM" | "UNLIMITED"
     quota_source: str = "global"
-    global_limit: int = 50
-    global_quota: int = 50
+    global_limit: int = 5
+    global_quota: int = 5
     custom_limit: Optional[int] = None
     custom_quota: Optional[int] = None
     timezone: str = "Asia/Kolkata"
@@ -192,7 +197,7 @@ def get_user_usage_data(user: CurrentUser) -> UserUsageResponse:
     elif user.is_unlimited:
         status_label = "Unlimited Approved"
     elif mode == "CUSTOM":
-        status_label = f"Custom Quota ({daily_limit} Pgs/Day)"
+        status_label = f"Custom Quota ({daily_limit} Bills/Day)"
     elif settings.site_mode == "PAID":
         status_label = "Paid Account"
     else:
@@ -206,7 +211,11 @@ def get_user_usage_data(user: CurrentUser) -> UserUsageResponse:
         pages_remaining_today=remaining,
         additional_page_balance=additional_bal,
         total_allowed_pages=total_allowed,
-        price_per_page=price_per_pg,
+        price_per_page=0.0,
+        bills_used_today=pages_used,
+        bills_remaining_today=remaining,
+        additional_bill_balance=additional_bal,
+        price_per_bill=0.0,
         is_unlimited=is_unlim,
         account_status=status_label,
         quota_mode=mode,

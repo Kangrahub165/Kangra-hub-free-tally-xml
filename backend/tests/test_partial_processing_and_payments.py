@@ -228,7 +228,7 @@ def test_payments_config_and_manual_upi_flow():
     assert cfg_res.status_code == 200
     cfg = cfg_res.json()
     assert cfg["price_per_page"] == 2.0
-    assert cfg["upi_id"] == "9418250639@ybl"
+    assert cfg["upi_id"] == "Kangrahub@pnb"
     assert "/buy-a-coffee/googlepay_qr.png" in cfg["qr_path"]
 
     # 2. Submit payment request with screenshot (e.g. 53 pages = ₹106)

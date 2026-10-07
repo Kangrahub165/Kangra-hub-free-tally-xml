@@ -1,3 +1,4 @@
+import time
 import logging
 import threading
 from datetime import datetime, timezone, timedelta
@@ -21,18 +22,97 @@ except Exception as _e:
     logger.warning(f"Unable to preload users from SQLite on startup: {_e}")
 
 
-# Unverified pending signups
+# Unverified pending signups (Authoritative 10-Minute Validity State)
 PENDING_VERIFICATIONS: Dict[str, Dict[str, Any]] = {}
 
-def register_pending_signup(email: str, full_name: Optional[str] = None, mobile_number: Optional[str] = None):
+def register_pending_signup(
+    email: str,
+    full_name: Optional[str] = None,
+    mobile_number: Optional[str] = None,
+    gender: str = "Male",
+    password_hash: str = "",
+    validity_seconds: int = 600
+) -> Dict[str, Any]:
+    """
+    Registers or updates an unverified pending signup with authoritative 10-minute validity.
+    Persists to both memory cache and SQLite.
+    """
+    clean_email = email.strip().lower()
+    clean_phone = "".join(c for c in (mobile_number or "") if c.isdigit())[-10:]
+    now = time.time()
+    expires_at = now + validity_seconds
+    now_iso = datetime.now(timezone.utc).isoformat()
+    record = {
+        "email": clean_email,
+        "full_name": full_name or "Pending User",
+        "mobile_number": clean_phone,
+        "gender": gender,
+        "password_hash": password_hash,
+        "otp_issued_at": now,
+        "otp_expires_at": expires_at,
+        "initiated_at": now_iso
+    }
+    with _LOCK:
+        PENDING_VERIFICATIONS[clean_email] = record
+    try:
+        db.save_pending_signup(
+            email=clean_email,
+            mobile_number=clean_phone,
+            full_name=full_name or "Pending User",
+            gender=gender,
+            password_hash=password_hash,
+            otp_issued_at=now,
+            otp_expires_at=expires_at
+        )
+    except Exception as e:
+        logger.warning(f"Failed to persist pending signup to SQLite: {e}")
+    return record
+
+def get_active_pending_signup(email: str) -> Optional[Dict[str, Any]]:
+    """
+    Retrieves the pending signup if and only if it is within its 10-minute validity period.
+    Cleans up expired state automatically if the 10 minutes have elapsed.
+    """
+    clean_email = email.strip().lower()
+    now = time.time()
+    with _LOCK:
+        rec = PENDING_VERIFICATIONS.get(clean_email)
+    
+    if not rec:
+        db_rec = db.get_pending_signup(clean_email)
+        if db_rec:
+            rec = dict(db_rec)
+            with _LOCK:
+                PENDING_VERIFICATIONS[clean_email] = rec
+
+    if not rec:
+        return None
+
+    # Check 10-minute expiry
+    expires_at = float(rec.get("otp_expires_at") or 0.0)
+    if now >= expires_at:
+        # Expired: clean up from memory and DB
+        with _LOCK:
+            PENDING_VERIFICATIONS.pop(clean_email, None)
+        try:
+            db.delete_pending_signup(clean_email)
+        except Exception:
+            pass
+        return None
+
+    res = dict(rec)
+    res["remaining_seconds"] = max(0, int(expires_at - now))
+    return res
+
+def delete_pending_signup(email: str) -> None:
+    """Removes pending signup record upon verification completion or cleanup."""
     clean_email = email.strip().lower()
     with _LOCK:
-        PENDING_VERIFICATIONS[clean_email] = {
-            "email": clean_email,
-            "full_name": full_name or "Pending User",
-            "mobile_number": mobile_number or "",
-            "initiated_at": datetime.now(timezone.utc).isoformat()
-        }
+        PENDING_VERIFICATIONS.pop(clean_email, None)
+    try:
+        db.delete_pending_signup(clean_email)
+    except Exception:
+        pass
 
 def register_user(
     user_id: str,
@@ -54,6 +134,10 @@ def register_user(
     with _LOCK:
         # Clear from pending if present
         PENDING_VERIFICATIONS.pop(clean_email, None)
+        try:
+            db.delete_pending_signup(clean_email)
+        except Exception:
+            pass
 
         user_entry = {
             "id": user_id,
@@ -150,17 +234,53 @@ def get_user_by_email(email: str) -> Optional[Dict[str, Any]]:
 
     return None
 
-def check_email_status(email: str) -> Dict[str, Any]:
+def check_email_status(email: str, mobile_number: Optional[str] = None) -> Dict[str, Any]:
     """
     Checks if an email already exists and whether it is verified.
-    Returns:
-      {"exists": True, "verified": True, "message": "This email address is already linked to an account."}
-      {"exists": True, "verified": False, "message": "This email address already has a pending verification."}
-      {"exists": False, "verified": False}
+    Supabase Auth is the authoritative source of truth for email registration status when configured.
+    Recognizes active 10-minute pending signups for session recovery.
     """
     clean_email = email.strip().lower()
 
-    # 1. Check verified registered users
+    # 1. Authoritative check: When Supabase is configured with service access, query Supabase Auth
+    if SupabaseService.is_configured() and SupabaseService.get_service_key():
+        auth_user = SupabaseService.get_auth_user_by_email(clean_email)
+        if auth_user:
+            is_confirmed = bool(auth_user.get("confirmed_at") or auth_user.get("email_confirmed_at"))
+            if is_confirmed:
+                return {
+                    "exists": True,
+                    "verified": True,
+                    "message": "This email address is already linked to an account."
+                }
+            else:
+                return {
+                    "exists": True,
+                    "verified": False,
+                    "message": "This email address already has an account pending verification."
+                }
+
+        # If user does NOT exist in Supabase Auth, check active 10-minute pending session
+        pending = get_active_pending_signup(clean_email)
+        if pending:
+            clean_phone = "".join(c for c in (mobile_number or "") if c.isdigit())[-10:] if mobile_number else ""
+            pending_phone = "".join(c for c in (pending.get("mobile_number") or "") if c.isdigit())[-10:]
+            same_mobile = bool(clean_phone and pending_phone and clean_phone == pending_phone)
+            return {
+                "exists": True,
+                "verified": False,
+                "pending_active": True,
+                "same_mobile": same_mobile,
+                "mobile_number": pending.get("mobile_number", ""),
+                "full_name": pending.get("full_name", ""),
+                "remaining_seconds": pending.get("remaining_seconds", 0),
+                "expires_at": pending.get("otp_expires_at", 0),
+                "message": "This email address already has an active pending verification."
+            }
+
+        return {"exists": False, "verified": False, "pending_active": False}
+
+    # Fallback when Supabase is not configured (e.g. offline unit testing)
     existing = get_user_by_email(clean_email)
     if existing:
         is_ver = existing.get("email_verified", True)
@@ -174,19 +294,28 @@ def check_email_status(email: str) -> Dict[str, Any]:
             return {
                 "exists": True,
                 "verified": False,
-                "message": "This email address already has a pending verification."
+                "message": "This email address already has an account pending verification."
             }
 
-    # 2. Check pending unverified signups
-    with _LOCK:
-        if clean_email in PENDING_VERIFICATIONS:
-            return {
-                "exists": True,
-                "verified": False,
-                "message": "This email address already has a pending verification."
-            }
+    # Check pending unverified signups with 10-minute active validity
+    pending = get_active_pending_signup(clean_email)
+    if pending:
+        clean_phone = "".join(c for c in (mobile_number or "") if c.isdigit())[-10:] if mobile_number else ""
+        pending_phone = "".join(c for c in (pending.get("mobile_number") or "") if c.isdigit())[-10:]
+        same_mobile = bool(clean_phone and pending_phone and clean_phone == pending_phone)
+        return {
+            "exists": True,
+            "verified": False,
+            "pending_active": True,
+            "same_mobile": same_mobile,
+            "mobile_number": pending.get("mobile_number", ""),
+            "full_name": pending.get("full_name", ""),
+            "remaining_seconds": pending.get("remaining_seconds", 0),
+            "expires_at": pending.get("otp_expires_at", 0),
+            "message": "This email address already has an active pending verification."
+        }
 
-    return {"exists": False, "verified": False}
+    return {"exists": False, "verified": False, "pending_active": False}
 
 def update_user_email(user_id: str, new_email: str) -> bool:
     clean_email = new_email.strip().lower()
@@ -496,17 +625,23 @@ def create_user_session(
     role: str = "USER",
     is_unlimited: bool = False,
     full_name: Optional[str] = None,
-    explicit_token: Optional[str] = None
+    explicit_token: Optional[str] = None,
+    gender: Optional[str] = None,
+    staff_source: Optional[str] = None,
+    is_gold: bool = False,
+    subscription_expiry: Optional[str] = None,
+    device_id: Optional[str] = None,
+    mobile_number: Optional[str] = None
 ) -> Dict[str, Any]:
     """
-    Issues and persists an authenticated user session.
+    Issues and persists an authenticated user session for 30 days.
     Guarantees session persistence and eliminates false 'session expired' race conditions.
     """
     import uuid
     token = explicit_token or f"kh-ses-{uuid.uuid4().hex}"
     refresh_token = f"kh-ref-{uuid.uuid4().hex}"
     now = datetime.now(timezone.utc)
-    expires_at = now + timedelta(days=7)
+    expires_at = now + timedelta(days=30)
 
     clean_email = email.strip().lower()
     clean_name = full_name or clean_email.split("@")[0].capitalize()
@@ -520,13 +655,19 @@ def create_user_session(
             "role": role,
             "is_unlimited": is_unlimited,
             "full_name": clean_name,
+            "mobile_number": mobile_number or "",
+            "gender": gender,
+            "staff_source": staff_source,
+            "is_gold": is_gold,
+            "subscription_expiry": subscription_expiry,
+            "device_id": device_id,
             "created_at": now.isoformat(),
             "expires_at": expires_at.isoformat()
         }
         ACTIVE_SESSIONS[token] = session_data
         REFRESH_TOKENS[refresh_token] = token
 
-    logger.info(f"Active session created for {clean_email} ({user_id})")
+    logger.info(f"Active 30-day session created for {clean_email} ({user_id})")
     return session_data
 
 def get_user_session(token: str) -> Optional[Dict[str, Any]]:

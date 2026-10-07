@@ -18,6 +18,11 @@ from app.api.ledgers import router as ledgers_router
 from app.api.auth import router as auth_router
 from app.api.appeals import router as appeals_router
 from app.api.payments import router as payments_router
+from app.api.invoices import router as invoices_router
+from app.api.stock_items import router as stock_items_router
+from app.api.reviews import router as reviews_router
+from app.api.staff import router as staff_router
+from app.api.subscriptions import router as subscriptions_router
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -26,15 +31,42 @@ async def lifespan(app: FastAPI):
     # Verify environment loading at startup
     if settings.supabase_url:
         masked_url = settings.supabase_url[:30] + "..." if len(settings.supabase_url) > 30 else settings.supabase_url
-        has_anon = bool(settings.supabase_anon_key)
-        has_service = bool(settings.supabase_service_role_key)
-        app_logger.info(f"Supabase Auth Environment: LOADED ({masked_url}, anon_key: {has_anon}, service_key: {has_service})")
+        has_secret = bool(settings.supabase_secret_key or settings.supabase_service_role_key)
+        has_publishable = bool(settings.supabase_anon_key or settings.supabase_publishable_key)
+        app_logger.info(f"Supabase Auth Environment: LOADED ({masked_url}, secret_key_configured: {has_secret}, publishable_key_configured: {has_publishable})")
     else:
         app_logger.warning("Supabase Auth Environment: NOT CONFIGURED (SUPABASE_URL is empty in backend/.env). Admin login will return HTTP 503 until credentials are added.")
 
     cleaned = cleanup_old_temp_files()
     if cleaned > 0:
         app_logger.info(f"Cleaned up {cleaned} legacy temporary files.")
+
+    # Auto-seed default Tally masters from root sample XMLs if available
+    try:
+        import os
+        from app.accounting.ledger_importer import global_ledger_store, decode_ledger_file, import_ledgers_from_text
+        from app.accounting.stock_item_importer import global_stock_item_store, import_stock_items_from_text
+
+        root_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+        ledgers_path = os.path.join(root_dir, "ledgers sample.xml")
+        stock_path = os.path.join(root_dir, "stock items list sample.xml")
+
+        if os.path.exists(ledgers_path):
+            with open(ledgers_path, "rb") as f:
+                l_text = decode_ledger_file(f.read())
+            res_l = import_ledgers_from_text(l_text, filename="ledgers sample.xml")
+            count_l = global_ledger_store.add_ledgers("default_session", res_l.ledgers)
+            app_logger.info(f"Auto-seeded {count_l} default Tally Ledgers for matching.")
+
+        if os.path.exists(stock_path):
+            with open(stock_path, "rb") as f:
+                s_text = decode_ledger_file(f.read())
+            res_s = import_stock_items_from_text(s_text, filename="stock items list sample.xml")
+            count_s = global_stock_item_store.add_items("default_session", res_s.items)
+            app_logger.info(f"Auto-seeded {count_s} default Tally Stock Items for matching.")
+    except Exception as e:
+        app_logger.warning(f"Could not auto-seed default Tally masters: {str(e)}")
+
     yield
     app_logger.info("Shutting down Kangra Hub Free Tally XML Engine...")
 
@@ -87,6 +119,11 @@ app.include_router(ledgers_router, prefix=settings.api_prefix)
 app.include_router(auth_router, prefix=settings.api_prefix)
 app.include_router(appeals_router, prefix=f"{settings.api_prefix}/appeals")
 app.include_router(payments_router)
+app.include_router(invoices_router, prefix=settings.api_prefix)
+app.include_router(stock_items_router, prefix=settings.api_prefix)
+app.include_router(reviews_router, prefix=settings.api_prefix)
+app.include_router(staff_router, prefix=settings.api_prefix)
+app.include_router(subscriptions_router, prefix=settings.api_prefix)
 
 @app.get("/")
 async def root():

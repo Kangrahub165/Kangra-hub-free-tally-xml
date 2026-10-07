@@ -61,7 +61,7 @@ router = APIRouter(prefix="/admin", tags=["Admin"], dependencies=[Depends(requir
 AUDIT_LOGS: List[Dict[str, Any]] = [
     {
         "id": "log-init",
-        "admin_email": "admin@tallyxml.in",
+        "admin_email": "admin@kangrahub.sales",
         "action": "SYSTEM_INITIALIZED",
         "target": "Platform",
         "metadata": {"mode": settings.site_mode, "daily_limit": settings.free_daily_page_limit},
@@ -72,7 +72,7 @@ AUDIT_LOGS: List[Dict[str, Any]] = [
 # System Notifications & Announcements Store
 SYSTEM_NOTIFICATIONS: Dict[str, Any] = {
     "announcement_enabled": False,
-    "announcement_message": "Welcome to Kangra Hub Free Tally XML. Daily allowance is 50 pages per user.",
+    "announcement_message": "Welcome to Kangra Hub Free Tally XML. Daily allowance is 5 Free Bills per user.",
     "announcement_type": "info",  # info | warning | alert
     "maintenance_banner": False,
     "maintenance_message": "Scheduled maintenance tonight at 02:00 AM IST."
@@ -647,16 +647,16 @@ async def update_user_quota(
     normalized_mode = payload.mode.upper().strip()
     if normalized_mode == "CUSTOM":
         if payload.custom_daily_limit is None or payload.custom_daily_limit < 1:
-            raise HTTPException(status_code=400, detail="Custom daily limit must be at least 1 page.")
+            raise HTTPException(status_code=400, detail="Custom daily limit must be at least 1 bill.")
         USER_CUSTOM_QUOTAS[user_id] = payload.custom_daily_limit
         db.set_custom_quota(user_id, payload.custom_daily_limit)
         log_admin_action(admin, "USER_QUOTA_CUSTOM_SET", user_id, {"custom_limit": payload.custom_daily_limit})
-        msg = f"User custom daily quota set to {payload.custom_daily_limit} pages/day."
+        msg = f"User custom daily quota set to {payload.custom_daily_limit} bills/day."
     else:
         USER_CUSTOM_QUOTAS.pop(user_id, None)
         db.set_custom_quota(user_id, None)
         log_admin_action(admin, "USER_QUOTA_RESET_TO_GLOBAL", user_id, {"global_limit": settings.free_daily_page_limit})
-        msg = f"User returned to global quota ({settings.free_daily_page_limit} pages/day)."
+        msg = f"User returned to global quota ({settings.free_daily_page_limit} bills/day)."
 
     effective = USER_CUSTOM_QUOTAS.get(user_id, settings.free_daily_page_limit)
     return {
@@ -1407,7 +1407,7 @@ async def admin_upload_and_convert(
 ):
     """
     Complete Admin PDF -> Tally XML conversion engine.
-    SERVER-SIDE QUOTA BYPASS: Admins are not restricted by 50-page daily limits.
+    SERVER-SIDE QUOTA BYPASS: Admins are not restricted by daily limits.
     Does NOT consume normal daily usage quota.
     Records full diagnostics telemetry, candidate scoring, and balance audits.
     """
@@ -2621,7 +2621,7 @@ async def get_security_overview(admin: CurrentUser = Depends(require_admin)):
     """Security events, active admin sessions, and privileged accounts."""
     return {
         "admin_accounts": [
-            {"email": "admin@tallyxml.in", "role": "SUPER_ADMIN", "last_active": "Just now", "ip": "127.0.0.1"},
+            {"email": "admin@kangrahub.sales", "role": "SUPER_ADMIN", "last_active": "Just now", "ip": "127.0.0.1"},
             {"email": "support@tallyxml.in", "role": "ADMIN", "last_active": "2 hours ago", "ip": "127.0.0.1"}
         ],
         "security_policies": [
@@ -2697,3 +2697,202 @@ async def update_section_129_settings(payload: Section129Update, admin: CurrentU
 
     log_admin_action(admin, "SECTION_129_SETTINGS_UPDATED", "Section129", payload.dict(exclude_none=True))
     return {"success": True, "message": "Section 129 settings updated successfully."}
+
+
+# ============================================================================
+# MAIN WEBSITE ADMIN DASHBOARD ENDPOINTS (PRD SECTIONS 7-18)
+# ============================================================================
+
+@router.get("/website-users")
+async def get_website_users(
+    search: Optional[str] = None,
+    status: Optional[str] = None,
+    admin: CurrentUser = Depends(require_admin)
+):
+    """
+    Returns all real registered platform users from SQLite and Supabase for the
+    Main Website Admin Dashboard.
+    """
+    from app.core.db import get_all_users
+    users = get_all_users(search=search)
+    
+    # Query invoice conversions count per user
+    from app.core.db import _get_connection
+    conn = _get_connection()
+    user_conv_counts = {}
+    try:
+        cursor = conn.cursor()
+        cursor.execute("SELECT user_id, COUNT(*) as cnt FROM conversions GROUP BY user_id")
+        for row in cursor.fetchall():
+            user_conv_counts[str(row["user_id"])] = row["cnt"]
+    finally:
+        conn.close()
+
+    result = []
+    for u in users:
+        uid = str(u.get("id"))
+        acc_status = u.get("account_status", "ACTIVE")
+        if status and status.upper() != "ALL" and acc_status.upper() != status.upper():
+            continue
+
+        result.append({
+            "id": uid,
+            "email": u.get("email"),
+            "full_name": u.get("full_name") or "User",
+            "mobile_number": u.get("mobile_number") or "",
+            "gender": u.get("gender") or "Not specified",
+            "role": u.get("role", "USER"),
+            "is_unlimited": bool(u.get("is_unlimited")),
+            "account_status": acc_status,
+            "email_verified": bool(u.get("email_verified", True)),
+            "mobile_verified": bool(u.get("mobile_verified", False)),
+            "registration_date": u.get("registration_date") or u.get("created_at"),
+            "last_login": u.get("last_login"),
+            "total_conversions": user_conv_counts.get(uid, 0)
+        })
+
+    return {"users": result, "total": len(result)}
+
+
+@router.get("/users/{user_id}/activity")
+async def get_single_user_activity(
+    user_id: str,
+    limit: int = 50,
+    admin: CurrentUser = Depends(require_admin)
+):
+    """
+    Returns the complete activity timeline for a specific user.
+    """
+    from app.core.db import get_user_activity_logs, get_user_by_id_or_email
+    user = get_user_by_id_or_email(user_id)
+    logs = get_user_activity_logs(user_id=user_id, limit=limit)
+    if not logs and user:
+        # Also check by email
+        logs = get_user_activity_logs(user_id=user.get("email"), limit=limit)
+    
+    return {
+        "user_id": user_id,
+        "user": user,
+        "activities": logs
+    }
+
+
+@router.get("/activity-logs")
+async def get_all_activity_logs(
+    user_id: Optional[str] = None,
+    action: Optional[str] = None,
+    module: Optional[str] = None,
+    status: Optional[str] = None,
+    limit: int = 100,
+    offset: int = 0,
+    admin: CurrentUser = Depends(require_admin)
+):
+    """
+    Returns audit trail logs: WHO did WHAT, WHEN, in WHICH MODULE, with WHAT STATUS.
+    """
+    from app.core.db import get_user_activity_logs
+    logs = get_user_activity_logs(
+        user_id=user_id,
+        action=action,
+        module=module,
+        status=status,
+        limit=limit,
+        offset=offset
+    )
+    return {"logs": logs, "count": len(logs)}
+
+
+@router.get("/security-audit-logs")
+async def get_all_security_audit_logs(
+    severity: Optional[str] = None,
+    limit: int = 100,
+    offset: int = 0,
+    admin: CurrentUser = Depends(require_admin)
+):
+    """
+    Returns security events, logins, suspensions, and administrative actions.
+    """
+    from app.core.db import get_security_audit_logs
+    logs = get_security_audit_logs(severity=severity, limit=limit, offset=offset)
+    return {"logs": logs, "count": len(logs)}
+
+
+@router.get("/reviews")
+async def get_admin_reviews(
+    status: Optional[str] = None,
+    limit: int = 100,
+    admin: CurrentUser = Depends(require_admin)
+):
+    """
+    Retrieves all ratings & reviews for administrative moderation.
+    """
+    from app.core.db import get_ratings_reviews
+    reviews = get_ratings_reviews(status=status, limit=limit)
+    
+    total = len(reviews)
+    avg_rating = round(sum(r["rating"] for r in reviews) / total, 1) if total > 0 else 5.0
+
+    return {
+        "reviews": reviews,
+        "total": total,
+        "average_rating": avg_rating
+    }
+
+
+class ModerateReviewRequest(BaseModel):
+    status: str  # APPROVED, HIDDEN, DELETED, FLAGGED
+    notes: Optional[str] = None
+
+
+@router.post("/reviews/{review_id}/moderate")
+async def moderate_review(
+    review_id: str,
+    payload: ModerateReviewRequest,
+    admin: CurrentUser = Depends(require_admin)
+):
+    """
+    Moderates a user review (Approve, Hide, Delete, Flag).
+    """
+    from app.core.db import moderate_rating_review
+    norm_status = payload.status.upper().strip()
+    if norm_status not in ("APPROVED", "HIDDEN", "DELETED", "FLAGGED", "PENDING"):
+        raise HTTPException(status_code=400, detail="Invalid moderation status.")
+    
+    ok = moderate_rating_review(review_id, norm_status, payload.notes)
+    if not ok:
+        raise HTTPException(status_code=404, detail="Review not found.")
+    
+    log_admin_action(
+        admin,
+        f"REVIEW_MODERATED_{norm_status}",
+        review_id,
+        {"status": norm_status, "notes": payload.notes}
+    )
+    return {"success": True, "message": f"Review marked as {norm_status}."}
+
+
+@router.get("/system-notifications")
+async def get_system_admin_notifications(
+    unread_only: bool = False,
+    limit: int = 50,
+    admin: CurrentUser = Depends(require_admin)
+):
+    """
+    Returns real-time system alerts and administrative notifications.
+    """
+    from app.core.db import get_admin_notifications
+    notifs = get_admin_notifications(unread_only=unread_only, limit=limit)
+    return {"notifications": notifs, "count": len(notifs)}
+
+
+@router.post("/system-notifications/{notif_id}/read")
+async def mark_single_system_notification_read(
+    notif_id: str,
+    admin: CurrentUser = Depends(require_admin)
+):
+    """
+    Marks a system notification as read.
+    """
+    from app.core.db import mark_notification_read
+    ok = mark_notification_read(notif_id)
+    return {"success": ok, "notification_id": notif_id}

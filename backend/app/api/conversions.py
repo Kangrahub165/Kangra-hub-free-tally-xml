@@ -237,7 +237,7 @@ async def upload_statement(
 ):
     """
     Step 1: Upload and parse bank statement PDF.
-    Enforces daily 50-page quota check BEFORE processing begins.
+    Enforces daily quota check BEFORE processing begins.
     Preserves exact configured Bank Ledger and Cash Ledger names without normalization.
     """
     job_id = f"job-{uuid.uuid4().hex[:10]}"

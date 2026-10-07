@@ -39,19 +39,327 @@ class RefreshTokenRequest(BaseModel):
 
 class CheckEmailRequest(BaseModel):
     email: str
+    mobile_number: Optional[str] = None
+
+class SupabaseSignupInitiateRequest(BaseModel):
+    email: str
+    mobile_number: str
+    full_name: str
+    gender: Optional[str] = "Male"
+    password: str
+
+class VerifyEmailOtpRequest(BaseModel):
+    email: str
+    otp: str
+    mobile_number: Optional[str] = None
+
+class ResendEmailOtpRequest(BaseModel):
+    email: str
+    mobile_number: Optional[str] = None
 
 @router.post("/check-email")
 async def check_email(payload: CheckEmailRequest):
     """
     Checks whether an email address is already associated with an account.
-    Returns:
-      {"exists": True, "verified": True, "message": "This email address is already linked to an account."}
-      {"exists": True, "verified": False, "message": "This email address already has a pending verification."}
-      {"exists": False, "verified": False}
+    Returns existing or pending status with 10-minute active window.
     """
     from app.core.user_store import check_email_status
     clean_email = payload.email.strip().lower()
-    return check_email_status(clean_email)
+    return check_email_status(clean_email, payload.mobile_number)
+
+@router.post("/signup/supabase-initiate")
+async def supabase_signup_initiate(payload: SupabaseSignupInitiateRequest):
+    """
+    Initiates user signup via Supabase Auth with Email OTP verification.
+    Enforces 10-minute OTP session recovery:
+    - If user re-submits with same email and same mobile while existing OTP is valid (<= 10 min):
+      recognizes pending unverified signup, DOES NOT send duplicate OTP, and returns active pending state.
+    - If OTP has expired after 10 minutes:
+      allows user to request fresh OTP with a new 10-minute validity period.
+    """
+    clean_email = payload.email.strip().lower()
+    clean_phone = "".join(c for c in payload.mobile_number if c.isdigit())[-10:]
+    
+    if len(clean_phone) != 10:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Please provide a valid 10-digit mobile number."
+        )
+
+    # 1. Check if user already exists and is verified
+    from app.core.user_store import check_email_status, get_active_pending_signup, register_pending_signup
+    status_info = check_email_status(clean_email, clean_phone)
+    if status_info.get("exists") and status_info.get("verified"):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="This email address is already linked to an account."
+        )
+
+    # Masked email formatting for display
+    parts = clean_email.split("@")
+    u_part = parts[0]
+    dom_part = parts[1] if len(parts) > 1 else ""
+    masked_email = f"{u_part[0]}****{u_part[-1]}@{dom_part}" if len(u_part) > 2 else f"{u_part}***@{dom_part}"
+
+    # 2. Check for active pending verification (Session Recovery)
+    active_pending = get_active_pending_signup(clean_email)
+
+    if active_pending:
+        # Check if mobile matches
+        pending_phone = active_pending.get("mobile_number") or ""
+        if pending_phone and pending_phone != clean_phone:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="A pending verification with a different mobile number is already in progress for this email address. Please use the original mobile number or wait until the current OTP expires."
+            )
+
+        # RECOVERY SUCCESS: Return existing pending session without sending duplicate OTP
+        remaining_secs = active_pending.get("remaining_seconds", 0)
+        logger.info(f"Recovered pending OTP verification session for {clean_email} ({remaining_secs}s remaining)")
+        return {
+            "success": True,
+            "status": "PENDING_OTP_ACTIVE",
+            "message": "An unverified signup is already pending. You can enter the OTP that was already sent to your email.",
+            "email": clean_email,
+            "mobile_number": clean_phone,
+            "masked_email": masked_email,
+            "remaining_seconds": remaining_secs,
+            "expires_at": active_pending.get("otp_expires_at")
+        }
+
+    # 3. No active pending verification (or previously expired): Send new Supabase Auth OTP
+    from app.core.supabase_service import SupabaseService
+    if not SupabaseService.is_configured():
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Authentication service is temporarily unavailable."
+        )
+
+    try:
+        # Sign up user with Supabase Auth
+        meta = {
+            "full_name": payload.full_name.strip(),
+            "mobile_number": f"+91{clean_phone}",
+            "phone": f"+91{clean_phone}",
+            "gender": payload.gender or "Male",
+            "role": "USER"
+        }
+        SupabaseService.sign_up(
+            email=clean_email,
+            password=payload.password,
+            metadata=meta
+        )
+    except Exception as err:
+        err_msg = str(err)
+        if "already registered" in err_msg.lower():
+            # If user already registered in Supabase but unconfirmed, dispatch fresh OTP
+            try:
+                SupabaseService.resend_signup_email_otp(clean_email)
+            except Exception as resend_err:
+                logger.warning(f"Resend signup OTP error: {resend_err}")
+        elif "rate limit" in err_msg.lower():
+            logger.warning(f"Supabase rate limit for {clean_email}: {err_msg}")
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail="Too many verification emails requested. Please wait a few minutes before trying again."
+            )
+        else:
+            logger.error(f"Supabase signup error for {clean_email}: {err_msg}")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=err_msg
+            )
+
+    # 4. Register new 10-minute pending state
+    new_pending = register_pending_signup(
+        email=clean_email,
+        full_name=payload.full_name.strip(),
+        mobile_number=clean_phone,
+        gender=payload.gender or "Male",
+        validity_seconds=600  # Exactly 10 minutes
+    )
+
+    logger.info(f"Supabase signup OTP issued for {clean_email} (valid for 600s)")
+    return {
+        "success": True,
+        "status": "OTP_SENT",
+        "message": "Verification code sent to your email address.",
+        "email": clean_email,
+        "mobile_number": clean_phone,
+        "masked_email": masked_email,
+        "remaining_seconds": 600,
+        "expires_at": new_pending["otp_expires_at"]
+    }
+
+@router.get("/signup/pending-status")
+async def get_signup_pending_status(email: str, mobile_number: Optional[str] = None):
+    """
+    Checks active pending verification status for session recovery upon page reload or revisit.
+    """
+    clean_email = email.strip().lower()
+    clean_phone = "".join(c for c in (mobile_number or "") if c.isdigit())[-10:] if mobile_number else ""
+
+    from app.core.user_store import get_active_pending_signup
+    active = get_active_pending_signup(clean_email)
+
+    if not active:
+        return {"active": False, "remaining_seconds": 0}
+
+    # If mobile is provided, verify match
+    pending_phone = active.get("mobile_number") or ""
+    if clean_phone and pending_phone and clean_phone != pending_phone:
+        return {"active": False, "remaining_seconds": 0, "reason": "MISMATCH"}
+
+    parts = clean_email.split("@")
+    u_part = parts[0]
+    dom_part = parts[1] if len(parts) > 1 else ""
+    masked_email = f"{u_part[0]}****{u_part[-1]}@{dom_part}" if len(u_part) > 2 else f"{u_part}***@{dom_part}"
+
+    return {
+        "active": True,
+        "email": clean_email,
+        "mobile_number": pending_phone,
+        "full_name": active.get("full_name", ""),
+        "masked_email": masked_email,
+        "remaining_seconds": active.get("remaining_seconds", 0),
+        "expires_at": active.get("otp_expires_at")
+    }
+
+@router.post("/signup/verify-email-otp")
+async def verify_supabase_email_otp(payload: VerifyEmailOtpRequest):
+    """
+    Verifies Email OTP via Supabase Auth.
+    Strictly enforces:
+    - 10-minute validity window (rejects expired OTPs).
+    - Email not marked as verified until Supabase confirms successful verification.
+    - Creates authenticated session upon confirmed verification.
+    """
+    clean_email = payload.email.strip().lower()
+    clean_otp = payload.otp.strip().replace(" ", "").replace("-", "")
+
+    if not clean_otp or len(clean_otp) < 6:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Please provide a valid 8-digit verification code."
+        )
+
+    # 1. Enforce 10-minute validity window
+    from app.core.user_store import get_active_pending_signup, delete_pending_signup, register_user, create_user_session
+    pending = get_active_pending_signup(clean_email)
+    if not pending:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="This verification code has expired (10-minute validity exceeded). Please request a new OTP."
+        )
+
+    # 2. Verify with Supabase Auth
+    from app.core.supabase_service import SupabaseService
+    try:
+        verify_res = SupabaseService.verify_email_otp(clean_email, clean_otp)
+    except Exception as err:
+        logger.warning(f"Supabase OTP verification rejected for {clean_email}: {err}")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="That verification code is incorrect or expired. Please check your email and try again."
+        )
+
+    # 3. Verification confirmed by Supabase Auth!
+    user_data = verify_res.get("user") or {}
+    session_data = verify_res.get("session") or {}
+    user_id = user_data.get("id") or f"user-{uuid.uuid4().hex[:12]}"
+    auth_token = session_data.get("access_token") or f"kh-usr-{uuid.uuid4().hex}"
+    refresh_token = session_data.get("refresh_token") or f"kh-ref-{uuid.uuid4().hex}"
+
+    clean_phone = pending.get("mobile_number") or ""
+    full_name = pending.get("full_name") or (user_data.get("user_metadata") or {}).get("full_name") or "Verified User"
+
+    # Register in application user store & SQLite
+    register_user(
+        user_id=user_id,
+        email=clean_email,
+        full_name=full_name,
+        mobile_number=clean_phone,
+        role="USER",
+        is_unlimited=False,
+        account_status="ACTIVE",
+        email_verified=True,
+        mobile_verified=bool(clean_phone)
+    )
+
+    # Create active session
+    session_info = create_user_session(
+        user_id=user_id,
+        email=clean_email,
+        role="USER",
+        is_unlimited=False,
+        full_name=full_name,
+        mobile_number=clean_phone,
+        explicit_token=auth_token
+    )
+
+    delete_pending_signup(clean_email)
+    logger.info(f"User email verified and account activated for {clean_email} (ID: {user_id})")
+
+    return {
+        "success": True,
+        "message": "Email verified successfully! Setting up your session...",
+        "token": session_info["token"],
+        "refresh_token": refresh_token,
+        "user": {
+            "id": user_id,
+            "email": clean_email,
+            "full_name": full_name,
+            "mobile_number": clean_phone,
+            "role": "USER",
+            "daily_allowance": settings.free_daily_page_limit
+        }
+    }
+
+@router.post("/signup/resend-email-otp")
+async def resend_supabase_email_otp(payload: ResendEmailOtpRequest):
+    """
+    Resends fresh Email OTP via Supabase Auth and resets the 10-minute validity window.
+    """
+    clean_email = payload.email.strip().lower()
+    clean_phone = "".join(c for c in (payload.mobile_number or "") if c.isdigit())[-10:] if payload.mobile_number else ""
+
+    from app.core.user_store import check_email_status, register_pending_signup, get_active_pending_signup
+    status_info = check_email_status(clean_email, clean_phone)
+    if status_info.get("exists") and status_info.get("verified"):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="This email address is already verified and active."
+        )
+
+    # Retrieve existing pending details if available to preserve name/mobile
+    existing = get_active_pending_signup(clean_email)
+    full_name = existing.get("full_name") if existing else "Pending User"
+    saved_phone = clean_phone or (existing.get("mobile_number") if existing else "")
+    gender = existing.get("gender") if existing else "Male"
+
+    # Resend via Supabase Auth
+    from app.core.supabase_service import SupabaseService
+    try:
+        SupabaseService.resend_signup_email_otp(clean_email)
+    except Exception as err:
+        logger.warning(f"Supabase resend OTP notice for {clean_email}: {err}")
+
+    # Renew 10-minute validity period
+    new_pending = register_pending_signup(
+        email=clean_email,
+        full_name=full_name,
+        mobile_number=saved_phone,
+        gender=gender,
+        validity_seconds=600  # Fresh 10 minutes
+    )
+
+    return {
+        "success": True,
+        "message": "A fresh verification code has been dispatched to your email.",
+        "remaining_seconds": 600,
+        "expires_at": new_pending["otp_expires_at"],
+        "cooldown_seconds": 60
+    }
 
 @router.post("/signup/send-otp")
 async def send_signup_otp(payload: SendSignupOtpRequest, request: Request):
@@ -322,69 +630,13 @@ async def user_login(payload: UserLoginRequest, request: Request):
         )
 
     # PRD Section 7: Reject admin credentials on normal user login page
-    if existing_user and (existing_user.get("role") in ("ADMIN", "SUPER_ADMIN") or email in ("admin@tallyxml.in", "admin@kangrahub.com")):
+    if existing_user and (existing_user.get("role") in ("ADMIN", "SUPER_ADMIN") or email in ("admin@kangrahub.sales", "admin@tallyxml.in", "admin@kangrahub.com")):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid login credentials."
         )
 
-    app_env = getattr(settings, "app_env", "development").lower()
-    from app.core.user_store import create_user_session
-    if app_env == "development" and existing_user and existing_user.get("account_status") == "ACTIVE":
-        sess = create_user_session(
-            user_id=existing_user["id"],
-            email=email,
-            role=existing_user.get("role", "USER"),
-            is_unlimited=existing_user.get("is_unlimited", False),
-            full_name=existing_user.get("full_name") or email.split("@")[0].capitalize()
-        )
-        return {
-            "token": sess["token"],
-            "refresh_token": sess["refresh_token"],
-            "user": {
-                "id": existing_user["id"],
-                "email": email,
-                "full_name": existing_user.get("full_name") or email.split("@")[0].capitalize(),
-                "role": existing_user.get("role", "USER"),
-                "is_unlimited": existing_user.get("is_unlimited", False)
-            }
-        }
-
     if not SupabaseService.is_configured():
-        if app_env == "development":
-            if email in ("admin@tallyxml.in", "admin@kangrahub.com"):
-                raise HTTPException(
-                    status_code=status.HTTP_401_UNAUTHORIZED,
-                    detail="Invalid login credentials."
-                )
-            
-            uid = user_id or f"usr-{uuid.uuid4().hex[:10]}"
-            from app.core.user_store import register_user
-            register_user(
-                user_id=uid,
-                email=email,
-                role="USER",
-                is_unlimited=False,
-                full_name=existing_user.get("full_name") if existing_user else email.split("@")[0].capitalize()
-            )
-            sess = create_user_session(
-                user_id=uid,
-                email=email,
-                role="USER",
-                is_unlimited=False,
-                full_name=existing_user.get("full_name") if existing_user else email.split("@")[0].capitalize()
-            )
-            return {
-                "token": sess["token"],
-                "refresh_token": sess["refresh_token"],
-                "user": {
-                    "id": uid,
-                    "email": email,
-                    "full_name": existing_user.get("full_name") if existing_user else email.split("@")[0].capitalize(),
-                    "role": "USER",
-                    "is_unlimited": False
-                }
-            }
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Authentication service is temporarily unavailable."
@@ -458,13 +710,22 @@ async def user_login(payload: UserLoginRequest, request: Request):
 
         # Cache active session in internal store for high-performance retrieval and zero false expiration
         from app.core.user_store import register_user, create_user_session
+        from app.core.db import get_user_by_id_or_email
+        existing_u = get_user_by_id_or_email(user_id) or get_user_by_id_or_email(email)
+        user_mobile = (
+            (existing_u.get("mobile_number") if existing_u else None)
+            or (profile.get("mobile_number") if profile else None)
+            or meta.get("mobile_number")
+            or meta.get("phone")
+            or ""
+        )
         register_user(
             user_id=user_id,
             email=u.get("email", email),
             role=role,
             is_unlimited=is_unlimited or (role in ("ADMIN", "SUPER_ADMIN")),
             full_name=meta.get("full_name") or "User",
-            mobile_number=meta.get("mobile_number") or ""
+            mobile_number=user_mobile
         )
         create_user_session(
             user_id=user_id,
@@ -472,6 +733,7 @@ async def user_login(payload: UserLoginRequest, request: Request):
             role=role,
             is_unlimited=is_unlimited or (role in ("ADMIN", "SUPER_ADMIN")),
             full_name=meta.get("full_name") or "User",
+            mobile_number=user_mobile,
             explicit_token=access_token
         )
 
@@ -482,7 +744,7 @@ async def user_login(payload: UserLoginRequest, request: Request):
                 "id": user_id,
                 "email": u.get("email", email),
                 "full_name": meta.get("full_name") or "User",
-                "mobile_number": meta.get("mobile_number") or "",
+                "mobile_number": user_mobile,
                 "role": role,
                 "is_unlimited": is_unlimited or (role in ("ADMIN", "SUPER_ADMIN"))
             }
@@ -676,14 +938,120 @@ async def verify_recovery_step2(payload: RecoveryVerifyStep2Request, request: Re
             detail=str(e)
         )
 
+class UpdateProfileRequest(BaseModel):
+    full_name: Optional[str] = None
+    mobile_number: Optional[str] = None
+    gender: Optional[str] = None
+
 @router.get("/me")
 async def get_current_auth_user(current_user: CurrentUser = Depends(get_current_user)):
-    """Returns profile information for the authenticated user session."""
+    """Returns comprehensive profile information for the authenticated user session."""
+    from app.core.db import get_user_by_id_or_email
+    db_user = get_user_by_id_or_email(current_user.id) or get_user_by_id_or_email(current_user.email) or {}
+    
     return {
         "id": current_user.id,
         "email": current_user.email,
         "role": current_user.role,
         "is_unlimited": current_user.is_unlimited,
-        "full_name": current_user.full_name
+        "is_staff": current_user.is_staff,
+        "is_gold": current_user.is_gold,
+        "staff_source": current_user.staff_source,
+        "subscription_expiry": current_user.subscription_expiry,
+        "full_name": db_user.get("full_name") or current_user.full_name or "Verified User",
+        "mobile_number": db_user.get("mobile_number") or current_user.mobile_number or "",
+        "gender": db_user.get("gender") or "Not specified",
+        "account_status": db_user.get("account_status", "ACTIVE"),
+        "email_verified": db_user.get("email_verified", True),
+        "created_at": db_user.get("registration_date") or db_user.get("created_at")
+    }
+
+@router.put("/profile")
+async def update_current_user_profile(
+    payload: UpdateProfileRequest,
+    current_user: CurrentUser = Depends(get_current_user)
+):
+    """
+    Updates the authenticated user's profile (full_name, mobile_number, gender).
+    Updates SQLite DB, user session cache, Supabase metadata, and records an activity audit log.
+    """
+    from app.core.db import update_user_profile, add_user_activity_log
+    from app.core.user_store import register_user
+
+    # Validate mobile if provided
+    clean_mobile = None
+    if payload.mobile_number is not None:
+        clean_mobile = "".join(c for c in payload.mobile_number if c.isdigit())
+        if len(clean_mobile) > 0 and len(clean_mobile) != 10:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Mobile number must be a valid 10-digit number."
+            )
+
+    updated = update_user_profile(
+        user_id=current_user.id,
+        full_name=payload.full_name,
+        mobile_number=clean_mobile,
+        gender=payload.gender
+    )
+
+    if not updated:
+        # Fallback by email
+        updated = update_user_profile(
+            user_id=current_user.email,
+            full_name=payload.full_name,
+            mobile_number=clean_mobile,
+            gender=payload.gender
+        )
+
+    # Sync into in-memory store
+    register_user(
+        user_id=current_user.id,
+        email=current_user.email,
+        full_name=payload.full_name or current_user.full_name,
+        mobile_number=clean_mobile or current_user.mobile_number,
+        role=current_user.role,
+        is_unlimited=current_user.is_unlimited
+    )
+
+    # Sync into Supabase user metadata if available
+    from app.core.supabase_service import SupabaseService
+    if SupabaseService.is_configured():
+        try:
+            SupabaseService.update_profile(
+                user_id=current_user.id,
+                full_name=payload.full_name or current_user.full_name,
+                mobile_number=clean_mobile or current_user.mobile_number
+            )
+        except Exception as e:
+            logger.warning(f"Could not sync Supabase profile update: {e}")
+
+    # Audit log WHO did WHAT, WHEN, in WHICH MODULE, with WHAT STATUS
+    add_user_activity_log(
+        user_id=current_user.id,
+        user_email=current_user.email,
+        action="PROFILE_UPDATED",
+        module="USER_PROFILE",
+        resource_id=current_user.id,
+        status="SUCCESS",
+        metadata={
+            "full_name": payload.full_name,
+            "mobile_number_set": bool(clean_mobile),
+            "gender": payload.gender
+        }
+    )
+
+    return {
+        "success": True,
+        "message": "Profile updated successfully.",
+        "user": {
+            "id": current_user.id,
+            "email": current_user.email,
+            "full_name": (updated or {}).get("full_name") or payload.full_name or current_user.full_name,
+            "mobile_number": (updated or {}).get("mobile_number") or clean_mobile or current_user.mobile_number,
+            "gender": (updated or {}).get("gender") or payload.gender or "Not specified",
+            "role": current_user.role,
+            "is_unlimited": current_user.is_unlimited
+        }
     }
 
