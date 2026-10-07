@@ -60,7 +60,7 @@ def get_user_daily_limit(user: CurrentUser) -> int:
     2. Per-user custom quota override (if configured by Admin)
     3. Global Free Daily Page Quota (settings.free_daily_page_limit)
     """
-    if user.has_quota_bypass or user.role in ("ADMIN", "SUPER_ADMIN") or user.is_unlimited or user.is_admin:
+    if user.has_quota_bypass or user.role in ("ADMIN", "SUPER_ADMIN", "STAFF") or user.is_staff or user.is_unlimited or user.is_admin:
         return 999999
     
     custom = db.get_custom_quota(user.id)
@@ -78,7 +78,7 @@ def get_user_daily_limit(user: CurrentUser) -> int:
 
 def get_user_quota_mode(user: CurrentUser) -> str:
     """Returns the quota mode: 'UNLIMITED', 'CUSTOM', or 'GLOBAL'."""
-    if user.has_quota_bypass or user.role in ("ADMIN", "SUPER_ADMIN") or user.is_unlimited or user.is_admin:
+    if user.has_quota_bypass or user.role in ("ADMIN", "SUPER_ADMIN", "STAFF") or user.is_staff or user.is_unlimited or user.is_admin:
         return "UNLIMITED"
     c = db.get_custom_quota(user.id)
     if c is None and user.email:
@@ -179,7 +179,7 @@ def get_user_usage_data(user: CurrentUser) -> UserUsageResponse:
         pages_used = max(recorded_pages, jobs_today_pages)
         _IN_MEMORY_DAILY_USAGE[key] = pages_used
     
-    is_unlim = user.has_quota_bypass or user.role in ("ADMIN", "SUPER_ADMIN") or user.is_unlimited or user.is_admin
+    is_unlim = user.has_quota_bypass or user.role in ("ADMIN", "SUPER_ADMIN", "STAFF") or user.is_staff or user.is_unlimited or user.is_admin
     daily_limit = get_user_daily_limit(user)
     remaining = 999999 if is_unlim else max(0, daily_limit - pages_used)
     mode = get_user_quota_mode(user)
@@ -194,6 +194,8 @@ def get_user_usage_data(user: CurrentUser) -> UserUsageResponse:
 
     if user.is_admin or user.role in ("ADMIN", "SUPER_ADMIN"):
         status_label = "Admin Unlimited"
+    elif user.is_staff or user.role == "STAFF":
+        status_label = "Staff Membership (Unlimited)"
     elif user.is_unlimited:
         status_label = "Unlimited Approved"
     elif mode == "CUSTOM":
@@ -233,7 +235,7 @@ def get_user_usage_data(user: CurrentUser) -> UserUsageResponse:
 
 def record_user_page_usage(user: CurrentUser, pages: int):
     """Authoritative server-side page usage tracker."""
-    if user.has_quota_bypass or user.is_admin or user.role in ("ADMIN", "SUPER_ADMIN") or user.is_unlimited:
+    if user.has_quota_bypass or user.is_admin or user.role in ("ADMIN", "SUPER_ADMIN", "STAFF") or user.is_staff or user.is_unlimited:
         return
     today = get_kolkata_today()
     key = f"{user.id}:{today}"

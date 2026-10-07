@@ -92,17 +92,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         ) {
           const isUserAdmin = profile.role === 'ADMIN' || profile.role === 'SUPER_ADMIN';
           const isExpired = !isUserAdmin && !!profile.subscription_expiry && new Date(profile.subscription_expiry) < new Date();
-          const isUserStaff = isUserAdmin || ((profile.role === 'STAFF' || !!profile.is_staff) && !isExpired);
+          const isUserStaff = isUserAdmin || ((profile.role === 'STAFF' || !!profile.is_staff || profile.staff_source === 'RAZORPAY_STAFF') && !isExpired);
           const userObj: UserSession = {
             id: profile.id,
             email: profile.email,
-            role: isUserAdmin ? 'ADMIN' : (profile.role === 'STAFF' ? (isExpired ? 'USER' : 'STAFF') : 'USER'),
+            role: isUserAdmin ? 'ADMIN' : ((profile.role === 'STAFF' || !!profile.is_staff || profile.staff_source === 'RAZORPAY_STAFF') ? (isExpired ? 'USER' : 'STAFF') : 'USER'),
             fullName: profile.full_name || '',
             mobileNumber: profile.mobile_number || '',
             gender: profile.gender || '',
             emailVerified: profile.email_verified,
             isStaff: isUserStaff,
-            isGold: isUserAdmin || (!!profile.is_gold && !isExpired),
+            isGold: isUserAdmin || isUserStaff || (!!profile.is_gold && !isExpired),
             staffSource: profile.staff_source,
             subscriptionExpiry: profile.subscription_expiry,
             isExpired: isExpired,

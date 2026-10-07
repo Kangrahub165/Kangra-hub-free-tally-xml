@@ -27,7 +27,7 @@ import { useAuth } from '@/components/auth/AuthProvider';
 
 export default function SettingsPage() {
   const router = useRouter();
-  const { isAuthenticated, isLoading } = useAuth();
+  const { isAuthenticated, isLoading, user, isStaff } = useAuth();
   const [activeTab, setActiveTab] = useState('mappings');
   const [savedSuccess, setSavedSuccess] = useState(false);
   const [successMsg, setSuccessMsg] = useState('Settings updated successfully.');
@@ -341,13 +341,19 @@ export default function SettingsPage() {
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                 <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200/80">
                   <div className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Account Level</div>
-                  <div className="text-lg font-black text-slate-900 mt-1">Standard Free</div>
-                  <div className="text-[11px] text-slate-500 mt-0.5">Complimentary community tier</div>
+                  <div className="text-lg font-black text-slate-900 mt-1">
+                    {isStaff ? 'Staff Membership' : (user?.role === 'ADMIN' ? 'Admin Unlimited' : 'Standard Free')}
+                  </div>
+                  <div className="text-[11px] text-slate-500 mt-0.5">
+                    {isStaff ? 'Unlimited processing with Gold verification' : 'Complimentary community tier'}
+                  </div>
                 </div>
 
                 <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200/80">
                   <div className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Daily Allowance</div>
-                  <div className="text-lg font-black text-brand-600 mt-1">5 Free Bills Daily</div>
+                  <div className="text-lg font-black text-brand-600 mt-1">
+                    {isStaff || user?.role === 'ADMIN' ? 'Unlimited Bills' : '5 Free Bills Daily'}
+                  </div>
                   <div className="text-[11px] text-slate-500 mt-0.5">Calculated on processed bills/invoices</div>
                 </div>
 

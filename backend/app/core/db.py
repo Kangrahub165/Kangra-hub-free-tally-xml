@@ -517,6 +517,16 @@ def upsert_user(data: Dict[str, Any]) -> Dict[str, Any]:
 
             if existing:
                 existing_dict = dict(existing)
+                target_role = data.get("role") if data.get("role") is not None else existing_dict["role"]
+                target_is_unlim = int(bool(data.get("is_unlimited"))) if "is_unlimited" in data else existing_dict["is_unlimited"]
+
+                # If user is currently an active STAFF member, prevent unintentional downgrades
+                if existing_dict.get("role") == "STAFF" and target_role != "STAFF" and target_role not in ("ADMIN", "SUPER_ADMIN"):
+                    active_mem = get_staff_membership_with_status_eval(user_id=uid, user_email=clean_email)
+                    if active_mem and active_mem.get("is_active"):
+                        target_role = "STAFF"
+                        target_is_unlim = 1
+
                 updated = {
                     "full_name": data.get("full_name") if data.get("full_name") is not None else existing_dict["full_name"],
                     "username": data.get("username") if data.get("username") is not None else (existing_dict.get("username") or clean_email.split("@")[0]),
@@ -525,8 +535,8 @@ def upsert_user(data: Dict[str, Any]) -> Dict[str, Any]:
                         if (data.get("mobile_number") and str(data.get("mobile_number")).strip())
                         else (existing_dict.get("mobile_number") or "")
                     ),
-                    "role": data.get("role") if data.get("role") is not None else existing_dict["role"],
-                    "is_unlimited": int(bool(data.get("is_unlimited"))) if "is_unlimited" in data else existing_dict["is_unlimited"],
+                    "role": target_role,
+                    "is_unlimited": target_is_unlim,
                     "account_status": data.get("account_status") if data.get("account_status") is not None else existing_dict["account_status"],
                     "email_verified": int(bool(data.get("email_verified"))) if "email_verified" in data else existing_dict["email_verified"],
                     "mobile_verified": int(bool(data.get("mobile_verified"))) if "mobile_verified" in data else existing_dict["mobile_verified"],
@@ -2443,11 +2453,13 @@ def update_staff_membership_status(user_id: str, status: str) -> bool:
             conn.close()
 
 def get_staff_membership_with_status_eval(
-    user_id: str,
+    user_id: Optional[str] = None,
+    user_email: Optional[str] = None,
     server_now_utc: Optional[datetime] = None
 ) -> Optional[Dict[str, Any]]:
     """
     Evaluates Staff Membership validity against trusted server UTC time (Section 4 & 6).
+    Searches by user_id or user_email (case-insensitive).
     If server_now >= membership_expires_at:
       - Automatically sets staff_status = 'EXPIRED'
       - Removes Gold Tick and Staff role, reverting to standard USER with 5 free bills/day
@@ -2455,17 +2467,52 @@ def get_staff_membership_with_status_eval(
     """
     from app.core.staff_membership import parse_iso_to_utc, ensure_utc, format_expiry_display, IST
 
+    clean_email = user_email.strip().lower() if user_email else None
     now_utc = ensure_utc(server_now_utc)
     with _LOCK:
         conn = _get_connection()
         try:
             cursor = conn.cursor()
-            cursor.execute("SELECT * FROM staff_memberships WHERE user_id = ?", (user_id,))
+            if user_id and clean_email:
+                cursor.execute("""
+                    SELECT * FROM staff_memberships 
+                    WHERE user_id = ? OR LOWER(user_email) = ? 
+                    ORDER BY id DESC LIMIT 1
+                """, (user_id, clean_email))
+            elif user_id:
+                cursor.execute("""
+                    SELECT * FROM staff_memberships 
+                    WHERE user_id = ? 
+                    ORDER BY id DESC LIMIT 1
+                """, (user_id,))
+            elif clean_email:
+                cursor.execute("""
+                    SELECT * FROM staff_memberships 
+                    WHERE LOWER(user_email) = ? 
+                    ORDER BY id DESC LIMIT 1
+                """, (clean_email,))
+            else:
+                return None
+
             row = cursor.fetchone()
             if not row:
                 return None
 
             mem = dict(row)
+            mem_id = mem["id"]
+            matched_user_id = mem["user_id"]
+
+            # If user_id was provided and differs from row's user_id, synchronize user_id across tables
+            if user_id and matched_user_id != user_id:
+                try:
+                    cursor.execute("UPDATE staff_memberships SET user_id = ? WHERE id = ?", (user_id, mem_id))
+                    cursor.execute("UPDATE membership_renewal_history SET user_id = ? WHERE user_id = ?", (user_id, matched_user_id))
+                    cursor.execute("UPDATE users SET id = ? WHERE LOWER(email) = ?", (user_id, clean_email or ""))
+                    conn.commit()
+                    mem["user_id"] = user_id
+                except Exception as sync_err:
+                    logger.debug(f"Error syncing user_id across membership tables: {sync_err}")
+
             exp_utc = parse_iso_to_utc(mem["membership_expires_at"])
             if not exp_utc:
                 return mem
@@ -2479,17 +2526,19 @@ def get_staff_membership_with_status_eval(
                     UPDATE staff_memberships SET
                         staff_status = 'EXPIRED',
                         updated_at = ?
-                    WHERE user_id = ?
-                    """, (now_iso, user_id))
+                    WHERE id = ?
+                    """, (now_iso, mem_id))
 
                     # Revert user to standard USER in SQLite
+                    effective_uid = user_id or matched_user_id
                     cursor.execute("""
                     UPDATE users SET
                         role = 'USER',
                         is_gold = 0,
+                        is_unlimited = 0,
                         updated_at = ?
-                    WHERE id = ? AND staff_source = 'RAZORPAY_STAFF'
-                    """, (now_iso, user_id))
+                    WHERE (id = ? OR (email IS NOT NULL AND LOWER(email) = ?)) AND staff_source = 'RAZORPAY_STAFF'
+                    """, (now_iso, effective_uid, clean_email or ""))
 
                     conn.commit()
                     mem["staff_status"] = "EXPIRED"
@@ -2498,9 +2547,10 @@ def get_staff_membership_with_status_eval(
                         from app.core.supabase_service import SupabaseService
                         if SupabaseService.is_configured():
                             SupabaseService.upsert_profile({
-                                "id": user_id,
+                                "id": effective_uid,
                                 "role": "USER",
-                                "is_gold": False
+                                "is_gold": False,
+                                "is_unlimited": False
                             })
                     except Exception as _sb_err:
                         logger.warning(f"Could not sync expired staff profile to Supabase: {_sb_err}")
@@ -2673,15 +2723,26 @@ def process_verified_membership_payment(
             ))
 
             # 6. Elevate user in users table
+            clean_email_lower = user_email.strip().lower()
             cursor.execute("""
             UPDATE users SET
                 role = 'STAFF',
                 staff_source = 'RAZORPAY_STAFF',
                 is_gold = 1,
+                is_unlimited = 1,
                 subscription_expiry = ?,
                 updated_at = ?
-            WHERE id = ? OR email = ?
-            """, (new_expiry_iso, now_iso, user_id, user_email))
+            WHERE id = ? OR LOWER(email) = ?
+            """, (new_expiry_iso, now_iso, user_id, clean_email_lower))
+
+            if cursor.rowcount == 0:
+                cursor.execute("""
+                INSERT INTO users (
+                    id, email, full_name, mobile_number, role, is_unlimited,
+                    is_gold, staff_source, subscription_expiry,
+                    account_status, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, 'STAFF', 1, 1, 'RAZORPAY_STAFF', ?, 'ACTIVE', ?, ?)
+                """, (user_id, clean_email_lower, user_name, clean_cust_phone, new_expiry_iso, now_iso, now_iso))
 
             # 7. Log to staff audit
             log_id = f"stf-log-{uuid.uuid4().hex[:12]}"
@@ -2701,7 +2762,9 @@ def process_verified_membership_payment(
                         "email": user_email,
                         "role": "STAFF",
                         "is_gold": True,
+                        "is_unlimited": True,
                         "staff_source": "RAZORPAY_STAFF",
+                        "staff_status": "ACTIVE",
                         "subscription_expiry": new_expiry_iso
                     })
             except Exception as _sb_err:
@@ -2720,17 +2783,33 @@ def process_verified_membership_payment(
         finally:
             conn.close()
 
-def get_user_membership_renewal_history(user_id: str) -> List[Dict[str, Any]]:
-    """Retrieves complete renewal history for a user."""
+def get_user_membership_renewal_history(user_id: Optional[str] = None, user_email: Optional[str] = None) -> List[Dict[str, Any]]:
+    """Retrieves complete renewal history for a user by user_id or user_email."""
+    clean_email = user_email.strip().lower() if user_email else None
     with _LOCK:
         conn = _get_connection()
         try:
             cursor = conn.cursor()
-            cursor.execute("""
-            SELECT * FROM membership_renewal_history
-            WHERE user_id = ?
-            ORDER BY created_at DESC
-            """, (user_id,))
+            if user_id and clean_email:
+                cursor.execute("""
+                SELECT * FROM membership_renewal_history
+                WHERE user_id = ? OR user_id IN (SELECT user_id FROM staff_memberships WHERE LOWER(user_email) = ?)
+                ORDER BY created_at DESC
+                """, (user_id, clean_email))
+            elif user_id:
+                cursor.execute("""
+                SELECT * FROM membership_renewal_history
+                WHERE user_id = ?
+                ORDER BY created_at DESC
+                """, (user_id,))
+            elif clean_email:
+                cursor.execute("""
+                SELECT * FROM membership_renewal_history
+                WHERE user_id IN (SELECT user_id FROM staff_memberships WHERE LOWER(user_email) = ?)
+                ORDER BY created_at DESC
+                """, (clean_email,))
+            else:
+                return []
             return [dict(r) for r in cursor.fetchall()]
         finally:
             conn.close()

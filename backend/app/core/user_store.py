@@ -131,6 +131,16 @@ def register_user(
     clean_email = email.strip().lower()
     now_iso = datetime.now(timezone.utc).isoformat()
 
+    # Prevent overwriting active STAFF status with default USER
+    if role not in ("ADMIN", "SUPER_ADMIN", "STAFF"):
+        try:
+            mem = db.get_staff_membership_with_status_eval(user_id=user_id, user_email=clean_email)
+            if mem and mem.get("is_active"):
+                role = "STAFF"
+                is_unlimited = True
+        except Exception:
+            pass
+
     with _LOCK:
         # Clear from pending if present
         PENDING_VERIFICATIONS.pop(clean_email, None)

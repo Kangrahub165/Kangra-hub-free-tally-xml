@@ -195,7 +195,7 @@ export default function UserDashboardPage() {
                 </span>
               ) : (
                 <Badge variant={usage?.is_unlimited ? 'purple' : 'success'} size="sm">
-                  {usage?.is_unlimited ? 'Unlimited Admin Tier' : '5 Free Bills Daily'}
+                  {usage?.is_unlimited ? 'Unlimited Tier' : '5 Free Bills Daily'}
                 </Badge>
               )}
             </div>
@@ -293,7 +293,7 @@ export default function UserDashboardPage() {
             </div>
 
             <div className="mt-4 pt-3 border-t border-slate-100 text-[11px] text-slate-500">
-              {usage?.is_unlimited ? 'Unlimited Admin quota' : 'Bills available to process today'}
+              {usage?.is_unlimited ? (isStaff ? 'Unlimited Staff quota' : 'Unlimited Admin quota') : 'Bills available to process today'}
             </div>
           </Card>
 

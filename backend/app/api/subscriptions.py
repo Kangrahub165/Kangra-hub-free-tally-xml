@@ -62,8 +62,8 @@ async def get_my_subscription(current_user: CurrentUser = Depends(get_current_us
     - Renewal history and pending expiry alerts
     """
     now_utc = datetime.now(timezone.utc)
-    mem = db.get_staff_membership_with_status_eval(current_user.id, server_now_utc=now_utc)
-    renewal_history = db.get_user_membership_renewal_history(current_user.id)
+    mem = db.get_staff_membership_with_status_eval(current_user.id, user_email=current_user.email, server_now_utc=now_utc)
+    renewal_history = db.get_user_membership_renewal_history(current_user.id, user_email=current_user.email)
 
     notification_alert = None
     if mem and mem.get("membership_expires_at"):

@@ -22,7 +22,7 @@ class CurrentUser(BaseModel):
 
     @model_validator(mode="after")
     def ensure_admin_attributes(self) -> "CurrentUser":
-        if self.role in ("ADMIN", "SUPER_ADMIN"):
+        if self.role in ("ADMIN", "SUPER_ADMIN", "STAFF") or (self.role and self.role.upper() == "STAFF"):
             self.is_gold = True
             self.is_unlimited = True
         return self
@@ -138,9 +138,16 @@ async def get_current_user(
         sub_exp = (db_u.get("subscription_expiry") if db_u else None) or active_sess.get("subscription_expiry")
         gender = (db_u.get("gender") if db_u else None) or active_sess.get("gender")
 
-        # PRD Section 4 & 6: Check Staff Membership validity at exact IST midnight boundary
-        if role == "STAFF":
-            mem_eval = db.get_staff_membership_with_status_eval(user_id, server_now_utc=datetime.now(timezone.utc))
+        # PRD Section 4 & 6: Check Staff Membership validity from staff_memberships table
+        mem_eval = db.get_staff_membership_with_status_eval(user_id=user_id, user_email=email, server_now_utc=datetime.now(timezone.utc))
+        if mem_eval and mem_eval.get("is_active"):
+            if not is_admin_user:
+                role = "STAFF"
+            is_gold = True
+            is_unlim = True
+            staff_src = mem_eval.get("source") or staff_src or "RAZORPAY_STAFF"
+            sub_exp = mem_eval.get("membership_expires_at") or sub_exp
+        elif role == "STAFF":
             if mem_eval and not mem_eval.get("is_active"):
                 # Membership expired at exact IST midnight! Revert to normal user limits
                 role = "USER"
@@ -315,9 +322,16 @@ async def get_current_user(
         sub_exp = db_u.get("subscription_expiry") if db_u else None
         gender = db_u.get("gender") if db_u else None
 
-        # PRD Section 4 & 6: Check Staff Membership validity at exact IST midnight boundary
-        if role == "STAFF":
-            mem_eval = db.get_staff_membership_with_status_eval(user_id, server_now_utc=datetime.now(timezone.utc))
+        # PRD Section 4 & 6: Check Staff Membership validity from staff_memberships table
+        mem_eval = db.get_staff_membership_with_status_eval(user_id=user_id, user_email=user_email, server_now_utc=datetime.now(timezone.utc))
+        if mem_eval and mem_eval.get("is_active"):
+            if not is_admin_user:
+                role = "STAFF"
+            is_gold = True
+            effective_unlimited = True
+            staff_src = mem_eval.get("source") or staff_src or "RAZORPAY_STAFF"
+            sub_exp = mem_eval.get("membership_expires_at") or sub_exp
+        elif role == "STAFF":
             if mem_eval and not mem_eval.get("is_active"):
                 role = "USER"
                 is_gold = False
@@ -349,7 +363,10 @@ async def get_current_user(
         if ua_data:
             is_unlimited = ua_data.get("unlimited") is True or ua_data.get("access_type") == "UNLIMITED"
 
-        effective_unlimited = is_admin_user or (bool(db_u.get("is_unlimited")) if db_u else is_unlimited)
+        if role in ("STAFF", "ADMIN", "SUPER_ADMIN"):
+            effective_unlimited = True
+        else:
+            effective_unlimited = is_admin_user or (bool(db_u.get("is_unlimited")) if db_u else is_unlimited)
         meta = u.get("user_metadata") or {}
 
         user_phone = (
@@ -379,7 +396,7 @@ async def get_current_user(
             id=user_id,
             email=u.get("email") or "",
             role=role,
-            is_unlimited=effective_unlimited,
+            is_unlimited=True if role in ("ADMIN", "SUPER_ADMIN", "STAFF") else effective_unlimited,
             full_name=meta.get("full_name") or "User",
             mobile_number=user_phone,
             gender=gender,
