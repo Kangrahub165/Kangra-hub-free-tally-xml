@@ -14,9 +14,11 @@ export function Header() {
   const pathname = usePathname();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [settings, setSettings] = useState<PublicSettings | null>(null);
+  const [mounted, setMounted] = useState(false);
   const { isAuthenticated, isAdmin, logout } = useAuth();
 
   useEffect(() => {
+    setMounted(true);
     getPublicSettings().then(setSettings).catch(() => {});
   }, []);
 
@@ -104,7 +106,7 @@ export function Header() {
 
           {/* User / Authentication CTAs */}
           <div className="hidden md:flex items-center gap-2.5">
-            {isAuthenticated ? (
+            {mounted && isAuthenticated ? (
               <div className="flex items-center gap-2">
                 {isAdmin ? (
                   <Link
@@ -208,7 +210,7 @@ export function Header() {
           </div>
 
           <div className="pt-3 border-t border-slate-100 flex flex-col gap-2">
-            {isAuthenticated ? (
+            {mounted && isAuthenticated ? (
               <>
                 <Link
                   href="/convert"

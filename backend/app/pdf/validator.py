@@ -61,3 +61,36 @@ def validate_pdf_file(file_path: str, password: Optional[str] = None) -> Tuple[i
         raise
     except Exception as e:
         raise InvalidPDFException(f"Failed to inspect PDF structure: {str(e)}")
+
+def validate_image_file(file_path: str) -> Tuple[int, int]:
+    """
+    Validates uploaded JPG / JPEG statement file:
+    1. Exists and is non-empty
+    2. Does not exceed max_image_size_mb (10 MB)
+    3. Valid image headers and readable by PIL
+    4. Returns (width, height)
+    """
+    from PIL import Image
+
+    if not os.path.exists(file_path) or os.path.getsize(file_path) == 0:
+        raise InvalidPDFException("The uploaded image file is empty or could not be read.")
+
+    max_size_mb = getattr(settings, "max_image_size_mb", 10)
+    file_size_mb = os.path.getsize(file_path) / (1024 * 1024)
+    if file_size_mb > max_size_mb:
+        raise InvalidPDFException(
+            f"Image size ({file_size_mb:.1f} MB) exceeds maximum allowed size of {max_size_mb} MB."
+        )
+
+    try:
+        with Image.open(file_path) as img:
+            img.verify()
+            width, height = img.size
+            if width < 100 or height < 100:
+                raise InvalidPDFException("The image resolution is too low to extract readable financial text.")
+            return width, height
+    except InvalidPDFException:
+        raise
+    except Exception as exc:
+        raise InvalidPDFException(f"Invalid or corrupted JPG/JPEG image: {str(exc)}")
+

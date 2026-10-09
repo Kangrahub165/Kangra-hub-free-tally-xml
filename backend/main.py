@@ -45,28 +45,57 @@ app = FastAPI(
     lifespan=lifespan
 )
 
-# CORS configuration
-allowed_origins = [
+# Dynamic CORS Configuration from Environment & Settings (PRD Item 1)
+origins_set = {
     "https://kangrahubtallyxml.netlify.app",
     "http://localhost:3000",
     "http://127.0.0.1:3000",
     "http://localhost:8000",
     "http://127.0.0.1:8000",
-]
+}
+if getattr(settings, "allowed_origins", None):
+    for raw_origin in settings.allowed_origins.split(","):
+        clean_orig = raw_origin.strip().rstrip("/")
+        if clean_orig:
+            origins_set.add(clean_orig)
+
 if settings.frontend_url:
-    clean_frontend_url = settings.frontend_url.rstrip("/")
-    if clean_frontend_url not in allowed_origins:
-        allowed_origins.append(clean_frontend_url)
+    clean_frontend_url = settings.frontend_url.strip().rstrip("/")
+    if clean_frontend_url:
+        origins_set.add(clean_frontend_url)
+
+allowed_origins = sorted(list(origins_set))
+app_logger.info(f"CORS Allowed Origins: {allowed_origins}")
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=allowed_origins,
     allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1|.*\.netlify\.app)(:\d+)?$",
     allow_credentials=True,
-    allow_methods=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH", "HEAD"],
     allow_headers=["*"],
     expose_headers=["Content-Disposition", "Content-Type", "Content-Length", "X-Total-Count"],
 )
+
+@app.middleware("http")
+async def ensure_cors_headers(request: Request, call_next):
+    """Guarantees CORS headers are attached on all responses, even on early errors or crashes."""
+    origin = request.headers.get("origin")
+    if request.method == "OPTIONS":
+        response = await call_next(request)
+        if origin and (origin in origins_set or "netlify.app" in origin or "localhost" in origin or "127.0.0.1" in origin):
+            response.headers["Access-Control-Allow-Origin"] = origin
+            response.headers["Access-Control-Allow-Credentials"] = "true"
+            response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS, PATCH, HEAD"
+            response.headers["Access-Control-Allow-Headers"] = request.headers.get("access-control-request-headers", "*")
+            response.headers["Access-Control-Max-Age"] = "600"
+        return response
+
+    response = await call_next(request)
+    if origin and (origin in origins_set or "netlify.app" in origin or "localhost" in origin or "127.0.0.1" in origin):
+        response.headers["Access-Control-Allow-Origin"] = origin
+        response.headers["Access-Control-Allow-Credentials"] = "true"
+    return response
 
 # Global Exception Handlers
 @app.exception_handler(AppBaseException)

@@ -459,3 +459,185 @@ class SupabaseService:
             logger.warning(f"Unable to query user appeals from Supabase: {exc}")
             return []
 
+    # =========================================================================
+    # Bank Statement Platform (bs_) User Management & Storage Helpers
+    # =========================================================================
+
+    @classmethod
+    def insert_bs_conversion(cls, conv_data: Dict[str, Any]) -> bool:
+        """Inserts a conversion record into public.bs_conversions table."""
+        if not cls.is_configured():
+            return False
+        auth_token = settings.supabase_service_role_key or cls.get_api_key()
+        url = f"{settings.supabase_url.rstrip('/')}/rest/v1/bs_conversions"
+        payload = json.dumps(conv_data).encode("utf-8")
+        headers = {
+            "apikey": cls.get_api_key(),
+            "Authorization": f"Bearer {auth_token}",
+            "Content-Type": "application/json",
+            "Prefer": "return=minimal"
+        }
+        try:
+            req = urllib.request.Request(url, data=payload, headers=headers, method="POST")
+            with urllib.request.urlopen(req) as res:
+                return res.status in (200, 201, 204)
+        except Exception as exc:
+            logger.debug(f"Unable to insert record into bs_conversions: {exc}")
+            return False
+
+    @classmethod
+    def insert_bs_audit_log(
+        cls,
+        action: str,
+        actor_id: Optional[str] = None,
+        target_user_id: Optional[str] = None,
+        details: Optional[Dict[str, Any]] = None,
+        ip_address: Optional[str] = None
+    ) -> bool:
+        """Inserts an immutable audit log into public.bs_audit_logs table."""
+        if not cls.is_configured():
+            return False
+        auth_token = settings.supabase_service_role_key or cls.get_api_key()
+        url = f"{settings.supabase_url.rstrip('/')}/rest/v1/bs_audit_logs"
+        log_entry = {
+            "action": action,
+            "actor_id": actor_id,
+            "target_user_id": target_user_id,
+            "details": details or {},
+            "ip_address": ip_address
+        }
+        payload = json.dumps(log_entry).encode("utf-8")
+        headers = {
+            "apikey": cls.get_api_key(),
+            "Authorization": f"Bearer {auth_token}",
+            "Content-Type": "application/json",
+            "Prefer": "return=minimal"
+        }
+        try:
+            req = urllib.request.Request(url, data=payload, headers=headers, method="POST")
+            with urllib.request.urlopen(req) as res:
+                return res.status in (200, 201, 204)
+        except Exception as exc:
+            logger.debug(f"Unable to insert into bs_audit_logs: {exc}")
+            return False
+
+    @classmethod
+    def insert_bs_login_history(
+        cls,
+        user_id: str,
+        ip_address: Optional[str] = None,
+        user_agent: Optional[str] = None,
+        success: bool = True
+    ) -> bool:
+        """Records user login event in public.bs_login_history."""
+        if not cls.is_configured():
+            return False
+        auth_token = settings.supabase_service_role_key or cls.get_api_key()
+        url = f"{settings.supabase_url.rstrip('/')}/rest/v1/bs_login_history"
+        entry = {
+            "user_id": user_id,
+            "ip_address": ip_address,
+            "user_agent": user_agent,
+            "success": success
+        }
+        payload = json.dumps(entry).encode("utf-8")
+        headers = {
+            "apikey": cls.get_api_key(),
+            "Authorization": f"Bearer {auth_token}",
+            "Content-Type": "application/json",
+            "Prefer": "return=minimal"
+        }
+        try:
+            req = urllib.request.Request(url, data=payload, headers=headers, method="POST")
+            with urllib.request.urlopen(req) as res:
+                return res.status in (200, 201, 204)
+        except Exception as exc:
+            logger.debug(f"Unable to insert into bs_login_history: {exc}")
+            return False
+
+    @classmethod
+    def query_bs_profiles(cls) -> List[Dict[str, Any]]:
+        """Queries all user profiles from public.bs_profiles."""
+        if not cls.is_configured():
+            return []
+        auth_token = settings.supabase_service_role_key or cls.get_api_key()
+        url = f"{settings.supabase_url.rstrip('/')}/rest/v1/bs_profiles?select=*&order=created_at.desc"
+        headers = {
+            "apikey": cls.get_api_key(),
+            "Authorization": f"Bearer {auth_token}"
+        }
+        try:
+            req = urllib.request.Request(url, headers=headers, method="GET")
+            with urllib.request.urlopen(req) as res:
+                data = json.loads(res.read().decode("utf-8"))
+                return data if isinstance(data, list) else []
+        except Exception as exc:
+            logger.debug(f"Unable to query bs_profiles: {exc}")
+            return []
+
+    @classmethod
+    def update_bs_profile(cls, user_id: str, update_data: Dict[str, Any]) -> bool:
+        """Updates a user profile in public.bs_profiles."""
+        if not cls.is_configured():
+            return False
+        auth_token = settings.supabase_service_role_key or cls.get_api_key()
+        url = f"{settings.supabase_url.rstrip('/')}/rest/v1/bs_profiles?id=eq.{user_id}"
+        payload = json.dumps(update_data).encode("utf-8")
+        headers = {
+            "apikey": cls.get_api_key(),
+            "Authorization": f"Bearer {auth_token}",
+            "Content-Type": "application/json",
+            "Prefer": "return=minimal"
+        }
+        try:
+            req = urllib.request.Request(url, data=payload, headers=headers, method="PATCH")
+            with urllib.request.urlopen(req) as res:
+                return res.status in (200, 204)
+        except Exception as exc:
+            logger.debug(f"Unable to update bs_profiles for {user_id}: {exc}")
+            return False
+
+    @classmethod
+    def query_bs_conversions(cls, user_id: Optional[str] = None) -> List[Dict[str, Any]]:
+        """Queries conversion history from public.bs_conversions."""
+        if not cls.is_configured():
+            return []
+        auth_token = settings.supabase_service_role_key or cls.get_api_key()
+        if user_id:
+            url = f"{settings.supabase_url.rstrip('/')}/rest/v1/bs_conversions?user_id=eq.{user_id}&select=*&order=created_at.desc"
+        else:
+            url = f"{settings.supabase_url.rstrip('/')}/rest/v1/bs_conversions?select=*&order=created_at.desc"
+        headers = {
+            "apikey": cls.get_api_key(),
+            "Authorization": f"Bearer {auth_token}"
+        }
+        try:
+            req = urllib.request.Request(url, headers=headers, method="GET")
+            with urllib.request.urlopen(req) as res:
+                data = json.loads(res.read().decode("utf-8"))
+                return data if isinstance(data, list) else []
+        except Exception as exc:
+            logger.debug(f"Unable to query bs_conversions: {exc}")
+            return []
+
+    @classmethod
+    def query_bs_audit_logs(cls) -> List[Dict[str, Any]]:
+        """Queries audit logs from public.bs_audit_logs."""
+        if not cls.is_configured():
+            return []
+        auth_token = settings.supabase_service_role_key or cls.get_api_key()
+        url = f"{settings.supabase_url.rstrip('/')}/rest/v1/bs_audit_logs?select=*&order=created_at.desc&limit=200"
+        headers = {
+            "apikey": cls.get_api_key(),
+            "Authorization": f"Bearer {auth_token}"
+        }
+        try:
+            req = urllib.request.Request(url, headers=headers, method="GET")
+            with urllib.request.urlopen(req) as res:
+                data = json.loads(res.read().decode("utf-8"))
+                return data if isinstance(data, list) else []
+        except Exception as exc:
+            logger.debug(f"Unable to query bs_audit_logs: {exc}")
+            return []
+
+

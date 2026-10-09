@@ -674,13 +674,42 @@ export async function uploadStatementPdf(
   if (cashLedgerName) formData.append('cash_ledger_name', cashLedgerName);
 
   const token = getAuthToken();
-  const res = await fetch(`${API_BASE}/conversions/upload`, {
+  const headers: Record<string, string> = {};
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
+
+  let res = await fetch(`${API_BASE}/conversions/upload`, {
     method: 'POST',
-    headers: {
-      Authorization: `Bearer ${token}`,
-    },
+    headers,
     body: formData,
   });
+
+  // Handle session expiration if token was supplied
+  if (res.status === 401 && token) {
+    // Check if it was a PDF password issue rather than an expired session
+    let peekData: any = null;
+    try {
+      peekData = await res.clone().json();
+    } catch {}
+    const isPdfPasswordIssue =
+      peekData?.code === 'ERR_PDF_PASSWORD_REQUIRED' ||
+      peekData?.code === 'ERR_INVALID_PASSWORD' ||
+      peekData?.code === 'ERR_PDF_ENCRYPTED' ||
+      (peekData?.message && /password|encrypt/i.test(peekData.message));
+
+    if (!isPdfPasswordIssue) {
+      const refreshedToken = await refreshSessionToken();
+      if (refreshedToken) {
+        headers['Authorization'] = `Bearer ${refreshedToken}`;
+        res = await fetch(`${API_BASE}/conversions/upload`, {
+          method: 'POST',
+          headers,
+          body: formData,
+        });
+      }
+    }
+  }
 
   if (!res.ok) {
     let err: any = {};
@@ -709,6 +738,8 @@ export async function uploadStatementPdf(
 
   return res.json();
 }
+
+export const uploadStatementFile = uploadStatementPdf;
 
 export async function unlockPdfFile(file: File, password: string): Promise<Blob> {
   const formData = new FormData();

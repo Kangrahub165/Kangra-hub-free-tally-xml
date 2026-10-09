@@ -235,10 +235,25 @@ export default function ConvertPage() {
   };
 
   const handleFileSelected = (selectedFile: File) => {
-    if (!selectedFile.name.toLowerCase().endsWith('.pdf')) {
-      setErrorMsg('Only bank-generated PDF statements are supported. Please upload a PDF file.');
+    const fileNameLower = selectedFile.name.toLowerCase();
+    const isPdf = fileNameLower.endsWith('.pdf');
+    const isImage = fileNameLower.endsWith('.jpg') || fileNameLower.endsWith('.jpeg');
+
+    if (!isPdf && !isImage) {
+      setErrorMsg('Unsupported file type. Please upload a PDF, JPG, or JPEG bank statement.');
       return;
     }
+
+    const maxSizeBytes = isImage ? 10 * 1024 * 1024 : 25 * 1024 * 1024;
+    if (selectedFile.size > maxSizeBytes) {
+      setErrorMsg(
+        isImage
+          ? 'File too large. Image statements (JPG/JPEG) must be under 10 MB.'
+          : 'File too large. PDF statements must be under 25 MB.'
+      );
+      return;
+    }
+
     setFile(selectedFile);
     setErrorMsg('');
   };
@@ -247,12 +262,13 @@ export default function ConvertPage() {
     if (!file) return;
     setErrorMsg('');
     setCurrentStep(2);
-    setProcessingStep('Analyzing PDF structure & checking page quota...');
+    const isImage = /\.(jpe?g)$/i.test(file.name);
+    setProcessingStep(isImage ? 'Analyzing statement with Gemini AI vision...' : 'Analyzing PDF structure & checking page quota...');
 
     try {
       setTimeout(() => {
         setCurrentStep(3);
-        setProcessingStep('Detecting bank signature & column boundaries...');
+        setProcessingStep(isImage ? 'Extracting transactions & verifying running balance math...' : 'Detecting bank signature & column boundaries...');
       }, 700);
 
       setTimeout(() => {
@@ -884,7 +900,7 @@ export default function ConvertPage() {
               </Badge>
             </div>
             <p className="text-xs text-navy-200">
-              Upload bank statement PDF → Verify transactions & running balance math → Export verified Tally XML
+              Upload bank statement (PDF, JPG, JPEG) → Verify transactions & running balance math → Export verified Tally XML
             </p>
           </div>
 
@@ -1136,7 +1152,7 @@ export default function ConvertPage() {
               <input
                 ref={fileInputRef}
                 type="file"
-                accept="application/pdf"
+                accept=".pdf,.jpg,.jpeg,application/pdf,image/jpeg"
                 className="hidden"
                 onChange={handleFileChange}
               />
@@ -1152,18 +1168,18 @@ export default function ConvertPage() {
                   <span className="text-brand-700 flex items-center justify-center gap-2">
                     <FileText className="w-5 h-5" /> {file.name}
                   </span>
-                ) : 'Upload Bank Statement PDF'}
+                ) : 'Upload Bank Statement (PDF, JPG, JPEG)'}
               </h2>
               <p className="text-xs text-slate-500 max-w-sm mx-auto mb-6 leading-relaxed relative z-10">
-                Drag and drop your digital statement PDF here, or <span className="text-brand-600 font-semibold group-hover:underline">browse files</span> from your device
+                Drag and drop your statement PDF, JPG, or JPEG photo here, or <span className="text-brand-600 font-semibold group-hover:underline">browse files</span> from your device
               </p>
               
               <div className="inline-flex items-center gap-3 px-4 py-2 rounded-xl bg-slate-100/80 text-[11px] font-bold text-slate-600 relative z-10 border border-slate-200 shadow-xs">
                 <span className="flex items-center gap-1.5"><Building2 className="w-3.5 h-3.5 text-slate-400" /> 38+ Banks</span>
                 <span className="w-1 h-1 rounded-full bg-slate-300" />
-                <span className="flex items-center gap-1.5"><Layers className="w-3.5 h-3.5 text-slate-400" /> Up to 25 MB</span>
+                <span className="flex items-center gap-1.5"><Layers className="w-3.5 h-3.5 text-slate-400" /> PDF / JPG / JPEG</span>
                 <span className="w-1 h-1 rounded-full bg-slate-300" />
-                <span className="flex items-center gap-1.5"><FileText className="w-3.5 h-3.5 text-slate-400" /> Max 200 Pages</span>
+                <span className="flex items-center gap-1.5"><Sparkles className="w-3.5 h-3.5 text-slate-400" /> Gemini AI Powered</span>
               </div>
             </div>
 

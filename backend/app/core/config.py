@@ -68,6 +68,19 @@ class Settings(BaseSettings):
     buy_coffee_message: str = "Enjoying Kangra Hub Free Tally XML? Support the project with a cup of coffee."
     buy_coffee_qr_path: str = "/buy-a-coffee/googlepay_qr.png"
 
+    # CORS Configuration
+    allowed_origins: str = "https://kangrahubtallyxml.netlify.app,http://localhost:3000,http://127.0.0.1:3000"
+
+    # Google Gemini AI Integration (PRD Item 3)
+    gemini_api_key: str = ""
+    gemini_model: str = "gemini-3.5-flash"
+    gemini_timeout_seconds: float = 45.0
+    gemini_enabled: bool = True
+
+    # Image upload configuration (PRD Item 4)
+    max_image_size_mb: int = 10
+    allowed_file_types: str = "pdf,jpg,jpeg"
+
     # Temp file retention (minutes)
     file_retention_minutes: int = 60
 
