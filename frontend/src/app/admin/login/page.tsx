@@ -2,8 +2,7 @@
 
 import React, { useState, Suspense } from 'react';
 import Link from 'next/link';
-import Image from 'next/image';
-import { useRouter, useSearchParams } from 'next/navigation';
+import { useRouter } from 'next/navigation';
 import { Shield, Lock, Mail, Eye, EyeOff, ArrowRight, ShieldCheck, ArrowLeft, KeyRound, CheckCircle2 } from 'lucide-react';
 import { setAuthToken, clearAuthToken, adminLogin, verifyAdmin, adminForgotPassword } from '@/lib/api';
 import { getSupabaseClient, sendAdminPasswordReset } from '@/lib/supabaseClient';
@@ -15,10 +14,7 @@ import { AdminPwaInstall } from '@/components/admin/AdminPwaInstall';
 
 function AdminLoginForm() {
   const router = useRouter();
-  const searchParams = useSearchParams();
-  const nextUrl = searchParams.get('next') || searchParams.get('redirect');
-  const isExpired = searchParams.get('expired') === 'true';
-  const isUnauthorized = searchParams.get('error') === 'unauthorized' || searchParams.get('denied') === 'true';
+  const [nextUrl, setNextUrl] = useState<string | null>(null);
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -26,15 +22,26 @@ function AdminLoginForm() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [resetSuccess, setResetSuccess] = useState('');
+  const [isMounted, setIsMounted] = useState(false);
 
-  // Handle session expired or unauthorized query parameters
+  // Safely read query parameters on client mount without triggering SSR hydration bailouts
   React.useEffect(() => {
-    if (isExpired) {
-      setError('Your admin session has expired. Please sign in again.');
-    } else if (isUnauthorized) {
-      setError('Administrator access is required.');
+    setIsMounted(true);
+    if (typeof window !== 'undefined') {
+      const searchParams = new URLSearchParams(window.location.search);
+      const next = searchParams.get('next') || searchParams.get('redirect');
+      if (next) setNextUrl(next);
+
+      const isExpired = searchParams.get('expired') === 'true';
+      const isUnauthorized = searchParams.get('error') === 'unauthorized' || searchParams.get('denied') === 'true';
+
+      if (isExpired) {
+        setError('Your admin session has expired. Please sign in again.');
+      } else if (isUnauthorized) {
+        setError('Administrator access is required.');
+      }
     }
-  }, [isExpired, isUnauthorized]);
+  }, []);
 
   // Password reset modal / section state
   const [showForgotModal, setShowForgotModal] = useState(false);
@@ -291,8 +298,12 @@ function AdminLoginForm() {
           >
             <ArrowLeft className="w-3.5 h-3.5" /> Return to Public Portal
           </Link>
-          <span className="text-slate-600 hidden sm:inline">•</span>
-          <AdminPwaInstall variant="login" />
+          {isMounted && (
+            <>
+              <span className="text-slate-600 hidden sm:inline">•</span>
+              <AdminPwaInstall variant="login" />
+            </>
+          )}
         </div>
 
       </div>

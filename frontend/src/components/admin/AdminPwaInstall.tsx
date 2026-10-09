@@ -21,8 +21,10 @@ export function AdminPwaInstall({ variant = 'header', onAction }: AdminPwaInstal
   const [isInstalled, setIsInstalled] = useState(false);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isInstalling, setIsInstalling] = useState(false);
+  const [isMounted, setIsMounted] = useState(false);
 
   useEffect(() => {
+    setIsMounted(true);
     // Check if running as installed standalone PWA
     const checkStandalone = () => {
       const isStandaloneMode = 
@@ -96,8 +98,8 @@ export function AdminPwaInstall({ variant = 'header', onAction }: AdminPwaInstal
     };
   }, [isModalOpen]);
 
-  // If running in standalone mode or already installed, hide install control completely
-  if (isStandalone || isInstalled) {
+  // Prevent SSR hydration mismatch and hide if standalone/installed
+  if (!isMounted || isStandalone || isInstalled) {
     return null;
   }
 

@@ -31,21 +31,35 @@ self.addEventListener('activate', (event) => {
 });
 
 self.addEventListener('fetch', (event) => {
-  // Pass non-GET requests directly to network
+  // Only handle GET requests
   if (event.request.method !== 'GET') return;
 
-  const url = new URL(event.request.url);
-
-  // Never cache backend API calls or authentication paths
-  if (url.pathname.startsWith('/api') || url.pathname.includes(':8000')) {
+  let url;
+  try {
+    url = new URL(event.request.url);
+  } catch {
     return;
   }
 
-  // Network-first strategy for pages and static assets
+  // Only intercept same-origin requests to prevent interference with backend APIs & CDNs
+  if (url.origin !== self.location.origin) {
+    return;
+  }
+
+  // Never cache backend API calls, dev sockets, or non-static routes
+  if (
+    url.pathname.startsWith('/api') ||
+    url.pathname.startsWith('/_next/webpack-hmr') ||
+    url.pathname.includes(':8000')
+  ) {
+    return;
+  }
+
+  // Network-first strategy for same-origin pages and static assets
   event.respondWith(
     fetch(event.request)
       .then((networkResponse) => {
-        if (networkResponse && networkResponse.status === 200) {
+        if (networkResponse && networkResponse.status === 200 && networkResponse.type === 'basic') {
           const responseToCache = networkResponse.clone();
           caches.open(CACHE_NAME).then((cache) => {
             cache.put(event.request, responseToCache).catch(() => {});
@@ -53,6 +67,25 @@ self.addEventListener('fetch', (event) => {
         }
         return networkResponse;
       })
-      .catch(() => caches.match(event.request))
+      .catch(async () => {
+        try {
+          const cached = await caches.match(event.request);
+          if (cached) {
+            return cached;
+          }
+          if (event.request.mode === 'navigate') {
+            const rootCached = await caches.match('/');
+            if (rootCached) {
+              return rootCached;
+            }
+          }
+        } catch {}
+        // Fallback valid Response object prevents "Failed to convert value to 'Response'"
+        return new Response('The requested offline resource is currently unavailable.', {
+          status: 503,
+          statusText: 'Service Unavailable',
+          headers: { 'Content-Type': 'text/plain; charset=utf-8' },
+        });
+      })
   );
 });

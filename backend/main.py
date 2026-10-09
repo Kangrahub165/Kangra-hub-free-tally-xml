@@ -46,12 +46,26 @@ app = FastAPI(
 )
 
 # CORS configuration
+allowed_origins = [
+    "https://kangrahubtallyxml.netlify.app",
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+    "http://localhost:8000",
+    "http://127.0.0.1:8000",
+]
+if settings.frontend_url:
+    clean_frontend_url = settings.frontend_url.rstrip("/")
+    if clean_frontend_url not in allowed_origins:
+        allowed_origins.append(clean_frontend_url)
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=allowed_origins,
+    allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1|.*\.netlify\.app)(:\d+)?$",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["Content-Disposition", "Content-Type", "Content-Length", "X-Total-Count"],
 )
 
 # Global Exception Handlers

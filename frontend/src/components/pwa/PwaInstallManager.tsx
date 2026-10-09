@@ -22,8 +22,10 @@ export function PwaInstallManager({
   const [deferredPrompt, setDeferredPrompt] = useState<BeforeInstallPromptEvent | null>(null);
   const [isStandalone, setIsStandalone] = useState(false);
   const [dismissed, setDismissed] = useState(false);
+  const [isMounted, setIsMounted] = useState(false);
 
   useEffect(() => {
+    setIsMounted(true);
     // Register Service Worker for PWA compliance
     if (typeof window !== 'undefined' && 'serviceWorker' in navigator) {
       navigator.serviceWorker.register('/sw.js').catch((err) => {
@@ -75,8 +77,8 @@ export function PwaInstallManager({
     return null;
   }
 
-  // If already installed or dismissed, do not render banner
-  if (isStandalone || dismissed || !deferredPrompt) {
+  // If not mounted, already installed, or dismissed, do not render banner
+  if (!isMounted || isStandalone || dismissed || !deferredPrompt) {
     return null;
   }
 
