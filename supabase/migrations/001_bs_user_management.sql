@@ -197,4 +197,117 @@ CREATE POLICY bs_settings_read ON bs_settings
 REVOKE UPDATE ON bs_profiles FROM authenticated;
 GRANT UPDATE (full_name, phone, company) ON bs_profiles TO authenticated;
 
--- Service role bypasses RLS and maintains full administrative rights on Render backend
+-- ==============================================================================
+-- 12. Daily Page Limits & Atomic Page Reservations (PRD Section 13)
+-- ==============================================================================
+ALTER TABLE bs_profiles ADD COLUMN IF NOT EXISTS pdf_daily_pages_override INT;
+ALTER TABLE bs_profiles ADD COLUMN IF NOT EXISTS jpg_daily_pages_override INT;
+
+INSERT INTO bs_settings (key, value) VALUES
+    ('daily_pages_pdf', '50'::jsonb),
+    ('daily_pages_jpg', '10'::jsonb)
+ON CONFLICT (key) DO NOTHING;
+
+-- Pages used per user, per day (India date: Asia/Kolkata), per file type
+CREATE TABLE IF NOT EXISTS bs_daily_usage (
+    user_id UUID NOT NULL REFERENCES bs_profiles(id) ON DELETE CASCADE,
+    usage_date DATE NOT NULL,
+    file_type TEXT NOT NULL CHECK (file_type IN ('pdf', 'jpg')),
+    pages_used INT NOT NULL DEFAULT 0 CHECK (pages_used >= 0),
+    PRIMARY KEY (user_id, usage_date, file_type)
+);
+
+ALTER TABLE bs_daily_usage ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS bs_usage_own_read ON bs_daily_usage;
+CREATE POLICY bs_usage_own_read ON bs_daily_usage
+    FOR SELECT USING (user_id = auth.uid() OR bs_is_admin());
+
+-- Check the limit and reserve pages in one atomic step
+CREATE OR REPLACE FUNCTION bs_reserve_pages(p_user UUID, p_type TEXT, p_pages INT)
+RETURNS JSONB
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+    v_role bs_role;
+    v_limit INT;
+    v_used INT;
+    v_today DATE := (NOW() AT TIME ZONE 'Asia/Kolkata')::DATE;
+BEGIN
+    IF p_type NOT IN ('pdf', 'jpg') OR p_pages IS NULL OR p_pages < 1 THEN
+        RETURN jsonb_build_object('allowed', FALSE, 'reason', 'invalid_request');
+    END IF;
+
+    SELECT role,
+           COALESCE(
+               CASE WHEN p_type = 'pdf' THEN pdf_daily_pages_override ELSE jpg_daily_pages_override END,
+               (SELECT (value #>> '{}')::INT FROM bs_settings WHERE key = 'daily_pages_' || p_type)
+           )
+    INTO v_role, v_limit
+    FROM bs_profiles
+    WHERE id = p_user AND status = 'active';
+
+    IF v_role IS NULL THEN
+        RETURN jsonb_build_object('allowed', FALSE, 'reason', 'user_inactive');
+    END IF;
+
+    -- Admins and Super Admins are unlimited for both PDF and JPG
+    IF v_role IN ('admin', 'super_admin') THEN
+        RETURN jsonb_build_object('allowed', TRUE, 'unlimited', TRUE);
+    END IF;
+
+    -- Safety net if setting row is missing
+    v_limit := COALESCE(v_limit, CASE WHEN p_type = 'pdf' THEN 50 ELSE 10 END);
+
+    INSERT INTO bs_daily_usage (user_id, usage_date, file_type, pages_used)
+    VALUES (p_user, v_today, p_type, 0)
+    ON CONFLICT DO NOTHING;
+
+    SELECT pages_used INTO v_used
+    FROM bs_daily_usage
+    WHERE user_id = p_user AND usage_date = v_today AND file_type = p_type
+    FOR UPDATE;
+
+    IF v_used + p_pages > v_limit THEN
+        RETURN jsonb_build_object(
+            'allowed', FALSE,
+            'reason', 'limit_reached',
+            'limit', v_limit,
+            'used', v_used,
+            'remaining', GREATEST(v_limit - v_used, 0)
+        );
+    END IF;
+
+    UPDATE bs_daily_usage
+    SET pages_used = pages_used + p_pages
+    WHERE user_id = p_user AND usage_date = v_today AND file_type = p_type;
+
+    RETURN jsonb_build_object(
+        'allowed', TRUE,
+        'limit', v_limit,
+        'used', v_used + p_pages,
+        'remaining', v_limit - v_used - p_pages
+    );
+END;
+$$;
+
+-- Give pages back when a conversion fails because of a system problem
+CREATE OR REPLACE FUNCTION bs_release_pages(p_user UUID, p_type TEXT, p_pages INT)
+RETURNS VOID
+LANGUAGE sql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+    UPDATE bs_daily_usage
+    SET pages_used = GREATEST(pages_used - p_pages, 0)
+    WHERE user_id = p_user
+      AND usage_date = (NOW() AT TIME ZONE 'Asia/Kolkata')::DATE
+      AND file_type = p_type;
+$$;
+
+-- Backend (service_role) only permissions
+REVOKE ALL ON FUNCTION bs_reserve_pages(UUID, TEXT, INT) FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION bs_release_pages(UUID, TEXT, INT) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION bs_reserve_pages(UUID, TEXT, INT) TO service_role;
+GRANT EXECUTE ON FUNCTION bs_release_pages(UUID, TEXT, INT) TO service_role;
