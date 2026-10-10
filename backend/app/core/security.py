@@ -1,3 +1,4 @@
+import json
 import logging
 from typing import Optional, Dict, Any
 from fastapi import Header, Query, Cookie, HTTPException, status, Depends
@@ -241,11 +242,29 @@ async def get_current_user(
                     u_id = payload_json.get("sub") or payload_json.get("user_id") or "test-staging-user"
                     u_email = payload_json.get("email") or "test-staging@example.com"
                     u_name = payload_json.get("user_metadata", {}).get("full_name") or u_email.split("@")[0].capitalize()
+
+                    from app.core import db
+                    db_u = db.get_user_by_id_or_email(u_id) or db.get_user_by_id_or_email(u_email)
+                    db_role = db_u.get("role") if db_u else None
+                    token_role = (
+                        (payload_json.get("user_metadata") or {}).get("role")
+                        or (payload_json.get("app_metadata") or {}).get("role")
+                        or payload_json.get("role")
+                    )
+                    is_admin_email = u_email.lower().strip() == getattr(settings, "admin_email", "admin@tallyxml.in").lower().strip()
+
+                    role = db_role or token_role or ("ADMIN" if is_admin_email else "USER")
+                    if is_admin_email and role not in ("ADMIN", "SUPER_ADMIN"):
+                        role = "ADMIN"
+
+                    is_admin_user = role in ("ADMIN", "SUPER_ADMIN")
+                    is_unlim = is_admin_user or (bool(db_u.get("is_unlimited")) if db_u else False)
+
                     return CurrentUser(
                         id=u_id,
                         email=u_email,
-                        role="USER",
-                        is_unlimited=True,
+                        role=role,
+                        is_unlimited=is_unlim,
                         full_name=u_name
                     )
             except Exception:
@@ -353,11 +372,19 @@ async def get_current_user(
             pass
 
 
-        role = db_role or (u.get("user_metadata") or {}).get("role", "USER")
-        is_admin_user = role in ("ADMIN", "SUPER_ADMIN")
-
         from app.core import db
         db_u = db.get_user_by_id_or_email(user_id) or db.get_user_by_id_or_email(u.get("email") or "")
+        is_admin_email = (u.get("email") or "").lower().strip() == getattr(settings, "admin_email", "admin@tallyxml.in").lower().strip()
+        role = (
+            db_role
+            or (u.get("app_metadata") or {}).get("role")
+            or (u.get("user_metadata") or {}).get("role")
+            or (db_u.get("role") if db_u else None)
+            or ("ADMIN" if is_admin_email else "USER")
+        )
+        if is_admin_email and role not in ("ADMIN", "SUPER_ADMIN"):
+            role = "ADMIN"
+        is_admin_user = role in ("ADMIN", "SUPER_ADMIN")
 
         # 4. Query public.user_access using authenticated user ID (auth.users.id)
         is_unlimited = False

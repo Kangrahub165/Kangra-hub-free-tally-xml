@@ -26,6 +26,7 @@ class Settings(BaseSettings):
     frontend_url: str = "http://localhost:3000"
     admin_email: str = "admin@tallyxml.in"
     admin_recovery_email: str = "kangrahub@gmail.com"
+    admin_password: str = ""
     
     # SMS / OTP credentials (Optional: Fast2SMS, Twilio, etc.)
     fast2sms_api_key: str = ""
