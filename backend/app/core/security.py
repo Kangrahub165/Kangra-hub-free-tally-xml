@@ -227,9 +227,37 @@ async def get_current_user(
                 full_name="Test Unlimited User"
             )
 
-    # 1. Require Supabase configuration - Fail safely if missing
+    # 1. Require Supabase configuration - Fail safely if missing in production
     from app.core.supabase_service import SupabaseService
     if not SupabaseService.is_configured():
+        if getattr(settings, "app_env", "").lower() in ("development", "staging"):
+            # In staging/development testing mode without Supabase, safely resolve identity without external database calls
+            try:
+                import base64
+                parts = raw_token.split(".")
+                if len(parts) >= 2:
+                    padded = parts[1] + "=" * ((4 - len(parts[1]) % 4) % 4)
+                    payload_json = json.loads(base64.urlsafe_b64decode(padded.encode("utf-8")).decode("utf-8"))
+                    u_id = payload_json.get("sub") or payload_json.get("user_id") or "test-staging-user"
+                    u_email = payload_json.get("email") or "test-staging@example.com"
+                    u_name = payload_json.get("user_metadata", {}).get("full_name") or u_email.split("@")[0].capitalize()
+                    return CurrentUser(
+                        id=u_id,
+                        email=u_email,
+                        role="USER",
+                        is_unlimited=True,
+                        full_name=u_name
+                    )
+            except Exception:
+                pass
+            return CurrentUser(
+                id="test-staging-user",
+                email="test-staging@example.com",
+                role="USER",
+                is_unlimited=True,
+                full_name="Staging Test User"
+            )
+
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Supabase authentication service is not configured on the server. Please configure SUPABASE_URL and SUPABASE_ANON_KEY in backend/.env."
