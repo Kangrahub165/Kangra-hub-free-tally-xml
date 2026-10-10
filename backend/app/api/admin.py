@@ -193,6 +193,8 @@ async def get_admin_metrics(admin: CurrentUser = Depends(require_admin)):
     needs_review = sum(1 for j in IN_MEMORY_JOBS.values() if j["status"] == "NEEDS_REVIEW")
     ambiguous = sum(1 for j in IN_MEMORY_JOBS.values() if j.get("is_ambiguous") or j["status"] == "AMBIGUOUS_BANK")
     failed = sum(1 for j in IN_MEMORY_JOBS.values() if j["status"] == "FAILED")
+    total_reversal_pairs = sum(j.get("reverse_pairs_count", 0) for j in IN_MEMORY_JOBS.values())
+    total_unmatched_reversals = sum(j.get("reverse_unmatched_count", 0) for j in IN_MEMORY_JOBS.values())
 
     return {
         "total_users": total_users,
@@ -205,6 +207,8 @@ async def get_admin_metrics(admin: CurrentUser = Depends(require_admin)):
         "needs_review_conversions": needs_review,
         "ambiguous_conversions": ambiguous,
         "failed_conversions": failed,
+        "total_reversal_pairs": total_reversal_pairs,
+        "total_unmatched_reversals": total_unmatched_reversals,
         "current_site_mode": settings.site_mode,
         "free_daily_page_limit": settings.free_daily_page_limit,
         "api_health": "Healthy",

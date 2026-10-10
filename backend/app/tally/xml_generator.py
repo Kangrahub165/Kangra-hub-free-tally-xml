@@ -73,6 +73,21 @@ class TallyXMLGenerator:
         if not snapshot.transactions:
             raise XMLGenerationException("No transactions available to generate Tally XML.")
 
+        # PRD Section 11.1: If Reverse Entries ledger is used, inject the ledger master
+        # under parent 'Suspense A/c' so Tally auto-creates it upon XML import.
+        has_reverse_entries = any(
+            (getattr(tx, "ledger_name", "") == "Reverse Entries" or getattr(tx, "is_reverse_entry", False))
+            for tx in snapshot.transactions
+        )
+        if has_reverse_entries:
+            lines.append('                <TALLYMESSAGE xmlns:UDF="TallyUDF">')
+            lines.append('                    <LEDGER NAME="Reverse Entries" ACTION="Create">')
+            lines.append('                        <NAME>Reverse Entries</NAME>')
+            lines.append('                        <PARENT>Suspense A/c</PARENT>')
+            lines.append('                        <OPENINGBALANCE>0</OPENINGBALANCE>')
+            lines.append('                    </LEDGER>')
+            lines.append('                </TALLYMESSAGE>')
+
         for tx in snapshot.transactions:
             # 1. Determine effective amount and voucher type
             tally_date = format_tally_date(tx.date)

@@ -28,6 +28,7 @@ class FinalVoucherEntry(BaseModel):
     credit: Decimal = Decimal("0.00")
     balance: Optional[Decimal] = None
     is_cash_transaction: bool = False
+    is_reverse_entry: bool = False
     reference: Optional[str] = None
     validation_status: str = "VALID"
     validation_notes: Optional[str] = None
@@ -107,6 +108,7 @@ class FinalConversionSnapshot(BaseModel):
                 credit=tx.credit if tx.credit is not None else Decimal("0.00"),
                 balance=tx.balance,
                 is_cash_transaction=tx.is_cash_transaction,
+                is_reverse_entry=getattr(tx, "is_reverse_entry", False),
                 reference=tx.reference or inst_num_str,
                 validation_status=tx.validation_status or "VALID",
                 validation_notes=tx.validation_notes

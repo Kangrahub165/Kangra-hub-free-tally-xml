@@ -24,6 +24,7 @@ from app.detector.bank_detector import detect_bank_from_document
 from app.parsers.registry import parser_registry
 from app.accounting.mapper import LedgerMapper
 from app.accounting.voucher_classifier import classify_voucher_type
+from app.accounting.reversal_detector import ReversalDetector
 from app.accounting.ledger_importer import global_ledger_store
 from app.api.ledgers import USER_BANK_CONFIGS
 from app.tally.xml_generator import TallyXMLGenerator
@@ -199,6 +200,9 @@ class ConversionJobSummary(BaseModel):
     suspense_count: int = 0
     mapped_count: int = 0
     duplicate_count: int = 0
+    reverse_entries_count: int = 0
+    reverse_pairs_count: int = 0
+    reverse_unmatched_count: int = 0
     warning_count: int = 0
     error_count: int = 0
     ready_for_export: bool = True
@@ -563,6 +567,13 @@ async def upload_statement(
             tx.ledger_name = mapper.map_transaction_ledger(tx, configured_bank_ledger)
         tx.voucher_type = classify_voucher_type(tx)
 
+    # PRD Section 11: Detect reversed and rejected entries (Reverse Entries ledger)
+    rev_detector = ReversalDetector(
+        reverse_ledger_name="Reverse Entries",
+        bank_charges_ledger_name="Bank Charges"
+    )
+    rev_detector.process_statement(statement)
+
     suspense_count = sum(1 for t in statement.transactions if (t.ledger_name == "Suspense" or t.mapping_status == "Suspense"))
     mapped_count = raw_count - suspense_count
 
@@ -629,6 +640,9 @@ async def upload_statement(
         "suspense_count": suspense_count,
         "mapped_count": mapped_count,
         "duplicate_count": getattr(statement, "duplicate_count", 0),
+        "reverse_entries_count": getattr(statement, "reverse_entries_count", 0),
+        "reverse_pairs_count": getattr(statement, "reverse_pairs_count", 0),
+        "reverse_unmatched_count": getattr(statement, "reverse_unmatched_count", 0),
         "warning_count": warning_count,
         "error_count": error_count,
         "ready_for_export": ready_for_export,
@@ -743,6 +757,13 @@ async def select_bank_manually(
         if not tx.ledger_name:
             tx.ledger_name = mapper.map_transaction_ledger(tx, configured_bank_ledger)
         tx.voucher_type = classify_voucher_type(tx)
+
+    # PRD Section 11: Detect reversed and rejected entries
+    rev_detector = ReversalDetector(
+        reverse_ledger_name="Reverse Entries",
+        bank_charges_ledger_name="Bank Charges"
+    )
+    rev_detector.process_statement(statement)
 
     suspense_count = sum(1 for t in statement.transactions if (t.ledger_name == "Suspense" or t.mapping_status == "Suspense"))
     mapped_count = raw_count - suspense_count
@@ -1128,6 +1149,170 @@ def _get_or_create_final_snapshot(
     job["cash_ledger_name"] = snapshot.cash_ledger_name
     return snapshot
 
+class ManualPairRequest(BaseModel):
+    row_index_1: int
+    row_index_2: int
+    reason: Optional[str] = "Manual pairing"
+
+class UnpairRequest(BaseModel):
+    row_index: int
+
+@router.get("/{job_id}/reversals")
+async def get_conversion_reversals(
+    job_id: str,
+    current_user: CurrentUser = Depends(get_current_user)
+):
+    """
+    PRD Section 11.5: Returns Reverse Entries report and detailed paired/unpaired rows.
+    """
+    job = IN_MEMORY_JOBS.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Conversion job not found.")
+    statement = _ensure_job_statement(job)
+    
+    pairs_map: Dict[str, Dict[str, Any]] = {}
+    unmatched: List[Dict[str, Any]] = []
+    linked_charges: List[Dict[str, Any]] = []
+
+    for tx in statement.transactions:
+        if getattr(tx, "linked_reversal_ref", None):
+            linked_charges.append({
+                "row_index": tx.row_index,
+                "date": tx.date.isoformat() if tx.date else None,
+                "narration": tx.narration,
+                "debit": float(tx.debit),
+                "credit": float(tx.credit),
+                "ledger_name": tx.ledger_name,
+                "linked_ref": tx.linked_reversal_ref,
+                "notes": tx.validation_notes
+            })
+        if not getattr(tx, "is_reverse_entry", False):
+            continue
+        
+        pair_id = getattr(tx, "reversal_pair_id", None)
+        if pair_id:
+            if pair_id not in pairs_map:
+                pairs_map[pair_id] = {
+                    "pair_id": pair_id,
+                    "reason": getattr(tx, "reversal_reason", "Reversal"),
+                    "amount": float(tx.debit if tx.debit > Decimal("0.00") else tx.credit),
+                    "debit_row": None,
+                    "credit_row": None,
+                    "net": 0.0
+                }
+            row_dict = {
+                "row_index": tx.row_index,
+                "date": tx.date.isoformat() if tx.date else None,
+                "narration": tx.narration,
+                "debit": float(tx.debit),
+                "credit": float(tx.credit),
+                "reversal_leg": getattr(tx, "reversal_leg", None),
+                "reference": tx.reference or tx.instrument_number or tx.cheque_number,
+                "status": tx.mapping_status
+            }
+            if tx.debit > Decimal("0.00"):
+                pairs_map[pair_id]["debit_row"] = row_dict
+            else:
+                pairs_map[pair_id]["credit_row"] = row_dict
+        else:
+            unmatched.append({
+                "row_index": tx.row_index,
+                "date": tx.date.isoformat() if tx.date else None,
+                "narration": tx.narration,
+                "debit": float(tx.debit),
+                "credit": float(tx.credit),
+                "reason": getattr(tx, "reversal_reason", "Reversal"),
+                "status": tx.mapping_status,
+                "notes": tx.validation_notes or "original entry not in this statement"
+            })
+
+    pairs_list = list(pairs_map.values())
+    for p in pairs_list:
+        d_amt = p["debit_row"]["debit"] if p.get("debit_row") else 0.0
+        c_amt = p["credit_row"]["credit"] if p.get("credit_row") else 0.0
+        p["net"] = round(d_amt - c_amt, 2)
+
+    net_total = sum(p["net"] for p in pairs_list)
+
+    return {
+        "job_id": job_id,
+        "ledger_name": "Reverse Entries",
+        "parent_group": "Suspense A/c",
+        "will_auto_create_ledger": True,
+        "pairs_count": len(pairs_list),
+        "unmatched_count": len(unmatched),
+        "total_reverse_rows": (len(pairs_list) * 2) + len(unmatched),
+        "net_total": net_total,
+        "pairs": pairs_list,
+        "unmatched": unmatched,
+        "linked_charges": linked_charges
+    }
+
+@router.post("/{job_id}/reversals/pair", response_model=ConversionJobSummary)
+async def pair_reversal_rows(
+    job_id: str,
+    req: ManualPairRequest,
+    current_user: CurrentUser = Depends(get_current_user)
+):
+    """Manually pair two rows as reverse entries."""
+    job = IN_MEMORY_JOBS.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Conversion job not found.")
+    statement = _ensure_job_statement(job)
+
+    r1 = next((t for t in statement.transactions if t.row_index == req.row_index_1), None)
+    r2 = next((t for t in statement.transactions if t.row_index == req.row_index_2), None)
+    if not r1 or not r2:
+        raise HTTPException(status_code=400, detail="One or both row indices not found.")
+
+    pair_id = f"rev-pair-manual-{uuid.uuid4().hex[:6]}"
+    r1.is_reverse_entry = True
+    r1.reversal_pair_id = pair_id
+    r1.paired_row_index = r2.row_index
+    r1.ledger_name = "Reverse Entries"
+    r1.suggested_ledger = "Reverse Entries"
+    r1.reversal_reason = req.reason or "Manual pairing"
+    r1.mapping_status = "Mapped"
+
+    r2.is_reverse_entry = True
+    r2.reversal_pair_id = pair_id
+    r2.paired_row_index = r1.row_index
+    r2.ledger_name = "Reverse Entries"
+    r2.suggested_ledger = "Reverse Entries"
+    r2.reversal_reason = req.reason or "Manual pairing"
+    r2.mapping_status = "Mapped"
+
+    return await get_conversion_job(job_id=job_id, current_user=current_user)
+
+@router.post("/{job_id}/reversals/unpair", response_model=ConversionJobSummary)
+async def unpair_reversal_row(
+    job_id: str,
+    req: UnpairRequest,
+    current_user: CurrentUser = Depends(get_current_user)
+):
+    """Unpairs a reverse entry row."""
+    job = IN_MEMORY_JOBS.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Conversion job not found.")
+    statement = _ensure_job_statement(job)
+
+    target_tx = next((t for t in statement.transactions if t.row_index == req.row_index), None)
+    if not target_tx:
+        raise HTTPException(status_code=400, detail="Row index not found.")
+
+    old_pair_id = target_tx.reversal_pair_id
+    for tx in statement.transactions:
+        if tx.row_index == req.row_index or (old_pair_id and tx.reversal_pair_id == old_pair_id):
+            tx.is_reverse_entry = False
+            tx.reversal_pair_id = None
+            tx.paired_row_index = None
+            tx.reversal_reason = None
+            tx.reversal_leg = None
+            tx.ledger_name = "Suspense"
+            tx.mapping_status = "Suspense"
+
+    return await get_conversion_job(job_id=job_id, current_user=current_user)
+
 @router.post("/{job_id}/generate")
 async def generate_tally_xml_endpoint(
     job_id: str,
@@ -1462,6 +1647,9 @@ async def get_conversion_job(
                 "suspense_count": sum(1 for t in tx_items if (t.ledger_name == "Suspense" or not t.ledger_name)),
                 "mapped_count": sum(1 for t in tx_items if (t.ledger_name and t.ledger_name != "Suspense")),
                 "duplicate_count": sum(1 for t in tx_items if getattr(t, "is_duplicate_suspect", False)),
+                "reverse_entries_count": sum(1 for t in tx_items if getattr(t, "is_reverse_entry", False)),
+                "reverse_pairs_count": len(set(t.reversal_pair_id for t in tx_items if getattr(t, "reversal_pair_id", None))),
+                "reverse_unmatched_count": sum(1 for t in tx_items if getattr(t, "is_reverse_entry", False) and getattr(t, "reversal_leg", "") == "UNPAIRED"),
                 "warning_count": sum(1 for t in tx_items if t.validation_status == "WARNING"),
                 "error_count": error_cnt,
                 "ready_for_export": error_cnt == 0,
@@ -1603,6 +1791,13 @@ async def process_remaining_pages(
             tx.ledger_name = mapper.map_transaction_ledger(tx, configured_bank_ledger)
         if not tx.voucher_type:
             tx.voucher_type = classify_voucher_type(tx)
+
+    # PRD Section 11: Detect reversed and rejected entries
+    rev_detector = ReversalDetector(
+        reverse_ledger_name="Reverse Entries",
+        bank_charges_ledger_name="Bank Charges"
+    )
+    rev_detector.process_statement(statement)
 
     # Update counts and metrics
     total_processed = (job.get("pages_processed") or 0) + pages_to_process

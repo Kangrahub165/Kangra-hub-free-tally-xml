@@ -130,7 +130,7 @@ export default function ConvertPage() {
   
   // Search & Filter within Review Table
   const [txSearch, setTxSearch] = useState('');
-  const [filterTab, setFilterTab] = useState<'ALL' | 'SUSPENSE' | 'MAPPED' | 'PAYMENT' | 'RECEIPT' | 'CONTRA' | 'WARNING' | 'ERROR' | 'DUPLICATE'>('ALL');
+  const [filterTab, setFilterTab] = useState<'ALL' | 'SUSPENSE' | 'MAPPED' | 'REVERSE' | 'PAYMENT' | 'RECEIPT' | 'CONTRA' | 'WARNING' | 'ERROR' | 'DUPLICATE'>('ALL');
   
   // Multi-row Selection & Bulk Actions Bar
   const [selectedRowIndices, setSelectedRowIndices] = useState<Set<number>>(new Set());
@@ -826,6 +826,9 @@ export default function ConvertPage() {
     t => t.ledger_name === 'Suspense' || t.mapping_status === 'Suspense' || !t.ledger_name
   ).length;
   const mappedCount = transactions.length - suspenseCount;
+  const reverseCount = transactions.filter(
+    t => Boolean(t.is_reverse_entry) || t.ledger_name === 'Reverse Entries' || Boolean(t.linked_reversal_ref)
+  ).length;
   const errorCount = transactions.filter(t => t.validation_status === 'ERROR').length;
   const warningCount = transactions.filter(t => t.validation_status === 'WARNING').length;
   const duplicateCount = transactions.filter(t => Boolean(t.is_duplicate_suspect)).length;
@@ -846,6 +849,9 @@ export default function ConvertPage() {
 
     if (filterTab === 'SUSPENSE') {
       return t.ledger_name === 'Suspense' || t.mapping_status === 'Suspense' || !t.ledger_name;
+    }
+    if (filterTab === 'REVERSE') {
+      return Boolean(t.is_reverse_entry) || t.ledger_name === 'Reverse Entries' || Boolean(t.linked_reversal_ref);
     }
     if (filterTab === 'MAPPED') {
       return t.ledger_name !== 'Suspense' && t.mapping_status !== 'Suspense' && Boolean(t.ledger_name);
@@ -1993,6 +1999,7 @@ export default function ConvertPage() {
                   { key: 'SUSPENSE', label: `Requires Review (${suspenseCount})`, alert: suspenseCount > 0 },
                   ...(errorCount > 0 ? [{ key: 'ERROR', label: `Errors (${errorCount})`, isError: true }] : []),
                   ...(warningCount > 0 ? [{ key: 'WARNING', label: `Warnings (${warningCount})`, isWarn: true }] : []),
+                  ...(reverseCount > 0 ? [{ key: 'REVERSE', label: `Reverse Entries (${reverseCount})`, isRev: true }] : []),
                   { key: 'MAPPED', label: `Mapped (${mappedCount})` },
                   { key: 'PAYMENT', label: 'Payment' },
                   { key: 'RECEIPT', label: 'Receipt' },
@@ -2010,6 +2017,8 @@ export default function ConvertPage() {
                           ? 'bg-amber-600 text-white shadow-xs'
                           : tab.alert
                           ? 'bg-amber-600 text-white shadow-xs'
+                          : tab.isRev
+                          ? 'bg-indigo-600 text-white shadow-xs'
                           : tab.isDup
                           ? 'bg-purple-700 text-white shadow-xs'
                           : 'bg-slate-900 text-white shadow-xs'
@@ -2019,6 +2028,8 @@ export default function ConvertPage() {
                         ? 'bg-amber-50 text-amber-800 border border-amber-300 hover:bg-amber-100'
                         : tab.alert
                         ? 'bg-amber-50 text-amber-800 border border-amber-200 hover:bg-amber-100'
+                        : tab.isRev
+                        ? 'bg-indigo-50 text-indigo-800 border border-indigo-200 hover:bg-indigo-100'
                         : tab.isDup
                         ? 'bg-purple-50 text-purple-800 border border-purple-200 hover:bg-purple-100'
                         : 'bg-slate-100/70 text-slate-700 hover:bg-slate-200/80 border border-slate-200/60'
@@ -2234,6 +2245,22 @@ export default function ConvertPage() {
                                 {tx.party_name && (
                                   <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-brand-800 bg-brand-50 px-2 py-0.2 rounded border border-brand-200">
                                     Party: {tx.party_name}
+                                  </span>
+                                )}
+                                {tx.is_reverse_entry && (
+                                  <span
+                                    className="inline-flex items-center gap-1 text-[10px] font-bold text-indigo-800 bg-indigo-100 px-1.5 py-0.2 rounded border border-indigo-200"
+                                    title={tx.reversal_reason ? `Reversal: ${tx.reversal_reason}` : 'Reverse Entry Pair (Net: ₹0.00)'}
+                                  >
+                                    ↩ Reverse Entry {tx.reversal_pair_id ? `(${tx.reversal_pair_id})` : ''}
+                                  </span>
+                                )}
+                                {tx.linked_reversal_ref && (
+                                  <span
+                                    className="inline-flex items-center gap-1 text-[10px] font-semibold text-teal-800 bg-teal-100 px-1.5 py-0.2 rounded border border-teal-200"
+                                    title={`Return charge linked to reversal ref ${tx.linked_reversal_ref}`}
+                                  >
+                                    Linked to Ref {tx.linked_reversal_ref}
                                   </span>
                                 )}
                                 {tx.is_cash_transaction && (

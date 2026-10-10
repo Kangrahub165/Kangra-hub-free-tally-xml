@@ -100,6 +100,13 @@ export interface TransactionItem {
   validation_notes?: string;
   is_duplicate_suspect?: boolean;
   duplicate_reason?: string;
+  is_reverse_entry?: boolean;
+  reversal_pair_id?: string;
+  reversal_leg?: 'ORIGINAL' | 'REVERSAL' | 'UNPAIRED' | string;
+  reversal_reason?: string;
+  paired_row_index?: number;
+  linked_charge_row_index?: number;
+  linked_reversal_ref?: string;
   source_page?: number;
   source_lines?: string[];
 }
@@ -135,6 +142,9 @@ export interface ConversionJobSummary {
   suspense_count?: number;
   mapped_count?: number;
   duplicate_count?: number;
+  reverse_entries_count?: number;
+  reverse_pairs_count?: number;
+  reverse_unmatched_count?: number;
   warning_count?: number;
   error_count?: number;
   ready_for_export?: boolean;
@@ -844,6 +854,53 @@ export async function bulkAssignLedgers(
       tx_ids: txIds,
       action: action || 'ASSIGN',
     }),
+  });
+}
+
+export async function getConversionReversals(jobId: string): Promise<{
+  job_id: string;
+  ledger_name: string;
+  parent_group: string;
+  will_auto_create_ledger: boolean;
+  pairs_count: number;
+  unmatched_count: number;
+  total_reverse_rows: number;
+  net_total: number;
+  pairs: Array<{
+    pair_id: string;
+    reason: string;
+    amount: number;
+    debit_row: any;
+    credit_row: any;
+    net: number;
+  }>;
+  unmatched: Array<any>;
+  linked_charges: Array<any>;
+}> {
+  return apiFetch(`/conversions/${jobId}/reversals`);
+}
+
+export async function pairReversalRows(
+  jobId: string,
+  rowIndex1: number,
+  rowIndex2: number,
+  reason?: string
+): Promise<ConversionJobSummary> {
+  return apiFetch<ConversionJobSummary>(`/conversions/${jobId}/reversals/pair`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ row_index_1: rowIndex1, row_index_2: rowIndex2, reason })
+  });
+}
+
+export async function unpairReversalRow(
+  jobId: string,
+  rowIndex: number
+): Promise<ConversionJobSummary> {
+  return apiFetch<ConversionJobSummary>(`/conversions/${jobId}/reversals/unpair`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ row_index: rowIndex })
   });
 }
 

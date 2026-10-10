@@ -43,6 +43,15 @@ class TransactionItem(BaseModel):
     is_duplicate_suspect: bool = False
     duplicate_reason: Optional[str] = None
 
+    # Reversal entries fields (PRD Section 11)
+    is_reverse_entry: bool = False
+    reversal_pair_id: Optional[str] = None
+    reversal_leg: Optional[str] = None  # "ORIGINAL", "REVERSAL", "UNPAIRED"
+    reversal_reason: Optional[str] = None
+    paired_row_index: Optional[int] = None
+    linked_charge_row_index: Optional[int] = None
+    linked_reversal_ref: Optional[str] = None
+
     # Source traceability & boundary diagnostics
     source_page: Optional[int] = None
     source_lines: Optional[List[str]] = None
@@ -82,6 +91,9 @@ class CanonicalStatement(BaseModel):
     suspense_count: int = 0
     mapped_count: int = 0
     duplicate_count: int = 0
+    reverse_entries_count: int = 0
+    reverse_pairs_count: int = 0
+    reverse_unmatched_count: int = 0
     
     # Accounting diagnostics
     page_diagnostics: List[PageDiagnosticSummary] = Field(default_factory=list)
