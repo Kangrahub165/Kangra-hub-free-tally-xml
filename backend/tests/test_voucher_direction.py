@@ -221,11 +221,22 @@ class TestRunningBalanceValidation:
     def test_large_discrepancy_is_error(self):
         """Discrepancy >= 1.00 should be ERROR."""
         txs = [
-            TransactionItem(date=date(2025, 4, 1), narration="TX1", debit=Decimal("1000.00"), balance=Decimal("11000.00")),
+            TransactionItem(date=date(2025, 4, 1), narration="TX1", debit=Decimal("1000.00"), balance=Decimal("12000.00")),
         ]
         stmt = self._make_statement(txs, opening=Decimal("10000.00"))
         result = validate_statement_balances(stmt)
         assert result.transactions[0].validation_status == "ERROR"
+
+    def test_inverted_debit_credit_auto_correction(self):
+        """Inverted debit/credit auto-correction when reversed formula matches balance."""
+        txs = [
+            TransactionItem(date=date(2025, 4, 1), narration="TX1", debit=Decimal("1000.00"), balance=Decimal("11000.00")),
+        ]
+        stmt = self._make_statement(txs, opening=Decimal("10000.00"))
+        result = validate_statement_balances(stmt)
+        assert result.transactions[0].validation_status == "VALID"
+        assert result.transactions[0].credit == Decimal("1000.00")
+        assert result.transactions[0].debit == Decimal("0.00")
 
     def test_no_balance_is_valid(self):
         """Transactions without balance data should be VALID (not warned)."""

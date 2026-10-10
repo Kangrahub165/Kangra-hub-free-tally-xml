@@ -73,8 +73,9 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en" className={inter.variable}>
+    <html lang="en" className={inter.variable} suppressHydrationWarning>
       <head>
+        <link rel="canonical" href={SEO_CONFIG.siteUrl} />
         <script
           dangerouslySetInnerHTML={{
             __html: `
@@ -88,7 +89,7 @@ export default function RootLayout({
           }}
         />
       </head>
-      <body className="font-sans antialiased min-h-screen flex flex-col justify-between">
+      <body className="font-sans antialiased min-h-screen flex flex-col justify-between" suppressHydrationWarning>
         <AuthProvider>
           <Header />
           <main className="flex-1">{children}</main>

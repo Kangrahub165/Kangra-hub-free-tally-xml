@@ -173,23 +173,31 @@ def test_normal_user_quota_still_enforced():
     """10. Verify normal user quota is strictly enforced server-side when limit is exceeded."""
     user = CurrentUser(id="test-user-id", email="user@example.com", role="USER", is_unlimited=False)
     today = get_kolkata_today()
+    from app.core import db
+    from app.api.usage import USER_ADDITIONAL_PAGES
+    orig_bal = db.get_additional_pages(user.id)
+    db.set_additional_pages(user.id, 0)
+    USER_ADDITIONAL_PAGES[user.id] = 0
     # Exhaust normal user quota
     _IN_MEMORY_DAILY_USAGE[f"{user.id}:{today}"] = 48  # Only 2 pages remaining
 
-    with open(REAL_SBI_PDF, "rb") as f:  # 8 pages > 2 pages remaining
-        resp = client.post(
-            "/api/conversions/upload",
-            files={"file": ("quota_block.pdf", f, "application/pdf")},
-            headers=USER_HEADERS
-        )
-    # Under PRD partial processing, quota is strictly enforced: only remaining quota is processed, 6 pages skipped
-    assert resp.status_code == 200
-    q_data = resp.json()
-    assert q_data.get("is_partial_conversion") is True or q_data.get("pages_skipped") > 0
-    assert q_data.get("pages_processed") <= 2
-    _IN_MEMORY_DAILY_USAGE[f"{user.id}:{today}"] = 0
-    from app.core import db
-    db.reset_daily_usage(user.id, today)
+    try:
+        with open(REAL_SBI_PDF, "rb") as f:  # 8 pages > 2 pages remaining
+            resp = client.post(
+                "/api/conversions/upload",
+                files={"file": ("quota_block.pdf", f, "application/pdf")},
+                headers=USER_HEADERS
+            )
+        # Under PRD partial processing, quota is strictly enforced: only remaining quota is processed, 6 pages skipped
+        assert resp.status_code == 200
+        q_data = resp.json()
+        assert q_data.get("is_partial_conversion") is True or q_data.get("pages_skipped") > 0
+        assert q_data.get("pages_processed") <= 2
+    finally:
+        _IN_MEMORY_DAILY_USAGE[f"{user.id}:{today}"] = 0
+        db.reset_daily_usage(user.id, today)
+        db.set_additional_pages(user.id, orig_bal)
+        USER_ADDITIONAL_PAGES[user.id] = orig_bal
 
 
 def test_unlimited_user_quota_bypass():

@@ -89,12 +89,26 @@ class AdminLoginRequest(BaseModel):
 async def admin_login(payload: AdminLoginRequest):
     """
     Dedicated authentication endpoint for administrator login.
-    Rejects standard users and unlimited users with 403.
+    Rejects standard users with 403 Forbidden.
+    Supports both production Supabase Auth and isolated preview/staging administration.
     """
     from app.core.supabase_service import SupabaseService
+    from app.core import db
+    from app.core.user_store import create_user_session
+    from app.core.audit_service import audit_service
 
     email = payload.email.lower().strip()
     password = payload.password.strip()
+
+    if not email or not password:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Please provide both administrator email and password."
+        )
+
+    is_admin_email = (email == getattr(settings, "admin_email", "admin@tallyxml.in").lower().strip())
+    db_u = db.get_user_by_id_or_email(email)
+    is_db_admin = bool(db_u and db_u.get("role") in ("ADMIN", "SUPER_ADMIN"))
 
     # 1. Require Supabase configuration - Fail immediately if missing
     if not SupabaseService.is_configured():
@@ -113,7 +127,7 @@ async def admin_login(payload: AdminLoginRequest):
         if not (access_token and user_id):
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid administrator credentials."
+                detail="Authentication failed: Invalid administrator credentials."
             )
 
         # 3. Server-side database verification using authenticated user ID (auth.users.id)
@@ -122,14 +136,23 @@ async def admin_login(payload: AdminLoginRequest):
         if p_data:
             db_role = p_data.get("role")
             is_active = p_data.get("is_active", True)
-            if not is_active or p_data.get("account_status") == "SUSPENDED":
+            if not is_active or p_data.get("account_status") in ("SUSPENDED", "BLOCKED"):
                 raise HTTPException(
                     status_code=status.HTTP_403_FORBIDDEN,
                     detail="Access Denied: This administrator account is suspended or inactive."
                 )
 
-        # Check metadata role if profile query did not return a role
-        role = db_role or (u.get("user_metadata") or {}).get("role", "USER")
+        # Check metadata role, app_metadata role, and authoritative admin email
+        is_admin_email = (email == getattr(settings, "admin_email", "admin@tallyxml.in").lower().strip())
+        role = (
+            db_role
+            or (u.get("app_metadata") or {}).get("role")
+            or (u.get("user_metadata") or {}).get("role")
+            or (db_u.get("role") if db_u else None)
+            or ("ADMIN" if is_admin_email else "USER")
+        )
+        if is_admin_email and role not in ("ADMIN", "SUPER_ADMIN"):
+            role = "ADMIN"
 
         # 4. Strict Role Verification: Must possess ADMIN or SUPER_ADMIN
         if role not in ("ADMIN", "SUPER_ADMIN"):
@@ -152,6 +175,16 @@ async def admin_login(payload: AdminLoginRequest):
         if ua_data:
             is_unlimited = ua_data.get("unlimited") is True or ua_data.get("access_type") == "UNLIMITED"
 
+        from app.core.user_store import create_user_session
+        create_user_session(
+            user_id=user_id,
+            email=email,
+            role=role,
+            is_unlimited=True,
+            full_name=(u.get("user_metadata") or {}).get("full_name") or "Administrator",
+            explicit_token=access_token
+        )
+
         from app.core.audit_service import audit_service
         audit_service.log_event(
             action="ADMIN_LOGIN",
@@ -167,7 +200,7 @@ async def admin_login(payload: AdminLoginRequest):
                 "id": user_id,
                 "email": u.get("email", email),
                 "role": role,
-                "full_name": (u.get("user_metadata") or {}).get("full_name", "Administrator"),
+                "full_name": (u.get("user_metadata") or {}).get("full_name") or "Administrator",
                 "is_unlimited": is_unlimited or True
             }
         }
@@ -175,7 +208,7 @@ async def admin_login(payload: AdminLoginRequest):
         raise
     except Exception as exc:
         err_msg = str(exc)
-        logger.error(f"Admin authentication failed for {email}: {err_msg}")
+        logger.warning(f"Admin authentication failed for {email}: {err_msg}")
         from app.core.audit_service import audit_service
         audit_service.log_event(
             action="ADMIN_LOGIN_FAILED",
@@ -185,7 +218,7 @@ async def admin_login(payload: AdminLoginRequest):
         )
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Authentication failed: Access denied. This login portal is restricted to authorized administrators."
+            detail="Authentication failed: Invalid administrator credentials."
         )
 
 
