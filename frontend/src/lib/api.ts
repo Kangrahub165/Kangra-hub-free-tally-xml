@@ -670,14 +670,23 @@ export async function getUserUsage(): Promise<UsageInfo> {
 }
 
 export async function uploadStatementPdf(
-  file: File,
+  fileOrFiles: File | File[],
   password?: string,
   bankOverride?: string,
   bankLedgerName?: string,
   cashLedgerName?: string
 ): Promise<ConversionJobSummary> {
   const formData = new FormData();
-  formData.append('file', file);
+  if (Array.isArray(fileOrFiles)) {
+    fileOrFiles.forEach((f) => {
+      formData.append('files', f);
+    });
+    if (fileOrFiles.length > 0) {
+      formData.append('file', fileOrFiles[0]);
+    }
+  } else {
+    formData.append('file', fileOrFiles);
+  }
   if (password) formData.append('password', password);
   if (bankOverride) formData.append('bank_override', bankOverride);
   if (bankLedgerName) formData.append('bank_ledger_name', bankLedgerName);
@@ -1703,6 +1712,104 @@ export async function getMyPaymentRequests(): Promise<PaymentRequest[]> {
     return [];
   }
 }
+
+// ---------------------------------------------------------------------------
+// Subscription Plans & Checkout API (PRD Requirements)
+// ---------------------------------------------------------------------------
+
+export interface SubscriptionPlanItem {
+  id: string;
+  name: string;
+  tagline: string;
+  price_inr: number;
+  price_paise: number;
+  bills_limit: number;
+  duration_days: number;
+  is_unlimited: boolean;
+  badge?: string;
+  features: string[];
+}
+
+export interface PaymentOrderResponse {
+  orderId: string;
+  order_id?: string;
+  amount: number;
+  amount_paise?: number;
+  currency: string;
+  keyId: string;
+  key_id?: string;
+  planId?: string;
+  plan_id?: string;
+  planName?: string;
+  plan_name?: string;
+  billsLimit?: number;
+  bills_limit?: number;
+  isUnlimited?: boolean;
+  is_unlimited?: boolean;
+}
+
+export interface CreatePaymentOrderPayload {
+  planId?: string;
+  customer_name?: string;
+  customer_email?: string;
+  customer_phone?: string;
+}
+
+export async function getSubscriptionPlans(): Promise<{ success: boolean; plans: SubscriptionPlanItem[] }> {
+  return apiFetch('/subscriptions/plans');
+}
+
+export async function createPaymentOrder(payload?: CreatePaymentOrderPayload): Promise<PaymentOrderResponse> {
+  return apiFetch('/payments/create-order', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload || { planId: 'basic' }),
+  });
+}
+
+export async function verifyPayment(payload: {
+  razorpay_payment_id: string;
+  razorpay_order_id?: string;
+  razorpay_signature?: string;
+  planId?: string;
+  customer_name?: string;
+  customer_email?: string;
+  customer_phone?: string;
+}): Promise<{
+  ok: boolean;
+  success: boolean;
+  message: string;
+  plan_id?: string;
+  plan_name?: string;
+  bills_limit?: number;
+  is_unlimited?: boolean;
+  membership_expires_at?: string;
+  last_valid_day?: string;
+  display_wording?: string;
+  payment_id?: string;
+}> {
+  return apiFetch('/payments/verify', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function getMySubscription(): Promise<{
+  success: boolean;
+  is_active: boolean;
+  plan_id: string;
+  plan_name: string;
+  bills_limit: number;
+  is_unlimited: boolean;
+  bills_converted_this_cycle: number;
+  bills_remaining_this_cycle: any;
+  membership_expires_at?: string;
+  last_valid_day?: string;
+}> {
+  return apiFetch('/subscriptions/me');
+}
+
 
 
 

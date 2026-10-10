@@ -269,6 +269,88 @@ class GeminiExtractor:
         return None
 
     @classmethod
+    def extract_from_multiple_image_bytes(
+        cls,
+        images_data: List[Tuple[str, bytes]],
+        mime_type: str = "image/jpeg"
+    ) -> Optional[CanonicalStatement]:
+        """
+        Extracts bank statement transactions across a batch of JPG/JPEG images.
+        Processes each image in sequence, ensuring all selected images are processed
+        without silently skipping files.
+        """
+        if not cls.is_available():
+            return None
+
+        merged_transactions: List[TransactionItem] = []
+        detected_bank: Optional[str] = None
+        account_number_masked: Optional[str] = None
+        opening_balance: Optional[Decimal] = None
+        closing_balance: Optional[Decimal] = None
+        statement_from: Optional[date] = None
+        statement_to: Optional[date] = None
+        successful_pages = 0
+        failed_files: List[str] = []
+
+        for idx, (filename, img_bytes) in enumerate(images_data, start=1):
+            try:
+                page_statement = cls.extract_from_image_bytes(img_bytes, mime_type=mime_type)
+                if page_statement and page_statement.transactions:
+                    successful_pages += 1
+                    if not detected_bank and page_statement.bank:
+                        detected_bank = page_statement.bank
+                    if not account_number_masked and page_statement.account_number_masked:
+                        account_number_masked = page_statement.account_number_masked
+                    if opening_balance is None and page_statement.opening_balance is not None:
+                        opening_balance = page_statement.opening_balance
+                    if page_statement.closing_balance is not None:
+                        closing_balance = page_statement.closing_balance
+                    if page_statement.statement_from:
+                        if statement_from is None or page_statement.statement_from < statement_from:
+                            statement_from = page_statement.statement_from
+                    if page_statement.statement_to:
+                        if statement_to is None or page_statement.statement_to > statement_to:
+                            statement_to = page_statement.statement_to
+
+                    for tx in page_statement.transactions:
+                        tx.source_page = idx
+                        merged_transactions.append(tx)
+                else:
+                    failed_files.append(filename)
+            except Exception as e:
+                logger.warning(f"Error extracting image {filename} (page {idx}): {e}")
+                failed_files.append(filename)
+
+        if not merged_transactions:
+            if failed_files:
+                raise Exception(
+                    f"Unable to extract readable transactions from the uploaded images ({', '.join(failed_files)}). "
+                    "Please verify that the bank statement photos are clear and focused."
+                )
+            return None
+
+        # Re-index all merged transactions sequentially 1..N
+        for idx, tx in enumerate(merged_transactions, start=1):
+            tx.row_index = idx
+
+        total_debit = sum(t.debit for t in merged_transactions)
+        total_credit = sum(t.credit for t in merged_transactions)
+
+        return CanonicalStatement(
+            bank=detected_bank or "Bank Account",
+            statement_format="JPG_Batch_Statement",
+            account_number_masked=account_number_masked,
+            statement_from=statement_from,
+            statement_to=statement_to,
+            opening_balance=opening_balance,
+            closing_balance=closing_balance,
+            total_debit=total_debit,
+            total_credit=total_credit,
+            confidence_score=99.0,
+            transactions=merged_transactions
+        )
+
+    @classmethod
     def extract_from_pdf_pages(
         cls,
         page_texts: List[str],

@@ -246,7 +246,8 @@ async def options_upload_statement():
 
 @router.post("/upload", response_model=ConversionJobSummary)
 async def upload_statement(
-    file: UploadFile = File(...),
+    file: Optional[List[UploadFile]] = File(None),
+    files: Optional[List[UploadFile]] = File(None),
     password: Optional[str] = Form(None),
     bank_override: Optional[str] = Form(None),
     bank_ledger_name: Optional[str] = Form(None),
@@ -255,37 +256,116 @@ async def upload_statement(
 ):
     """
     Step 1: Upload and parse bank statement (PDF, JPG, JPEG).
+    Enforces batch upload limits:
+    - Normal users: up to 10 JPG/JPEG images per batch.
+    - Administrators: up to 50 JPG/JPEG images per batch.
     Enforces daily page quota check BEFORE processing begins.
     Extracts with Google Gemini AI (~99% accuracy) with seamless fallback to rule-based bank parsers.
     Preserves exact configured Bank Ledger and Cash Ledger names without normalization.
     """
+    raw_files = files if (files and len(files) > 0) else (file or [])
+    if not raw_files:
+        raise HTTPException(status_code=400, detail="No files uploaded. Please select at least one statement file.")
+
     job_id = f"job-{uuid.uuid4().hex[:10]}"
-    orig_filename = file.filename or "statement.pdf"
-    file_ext = os.path.splitext(orig_filename)[1].lower().lstrip(".")
-    if not file_ext or file_ext not in ("pdf", "jpg", "jpeg"):
-        raise InvalidPDFException("Unsupported file type. Please upload a PDF, JPG, or JPEG bank statement.")
 
-    app_logger.info(f"Starting conversion job {job_id} ({file_ext.upper()}) for user {current_user.email}, file: {orig_filename}")
+    is_admin = bool(current_user.is_admin or (current_user.role in ("ADMIN", "SUPER_ADMIN")))
+    max_jpg_limit = 50 if is_admin else 10
 
-    # Persist uploaded file to permanent CONVERSION_STORAGE_DIR
-    saved_file_path = os.path.join(CONVERSION_STORAGE_DIR, f"{job_id}.{file_ext}")
-    content = await file.read()
-    with open(saved_file_path, "wb") as f:
-        f.write(content)
+    pdf_files: List[UploadFile] = []
+    image_files: List[UploadFile] = []
+    invalid_files: List[str] = []
 
-    is_image = file_ext in ("jpg", "jpeg")
+    for f in raw_files:
+        fname = f.filename or "statement"
+        ext = os.path.splitext(fname)[1].lower().lstrip(".")
+        if ext == "pdf":
+            pdf_files.append(f)
+        elif ext in ("jpg", "jpeg"):
+            image_files.append(f)
+        else:
+            invalid_files.append(fname)
+
+    if invalid_files:
+        raise InvalidPDFException(
+            f"Unsupported file type ({', '.join(invalid_files)}). Please upload a PDF, JPG, or JPEG bank statement."
+        )
+
+    if pdf_files and image_files:
+        raise InvalidPDFException(
+            "Mixed file types are not supported. Please upload either a single PDF document or a batch of JPG/JPEG images."
+        )
+
+    if len(pdf_files) > 1:
+        raise InvalidPDFException(
+            f"Multiple PDF upload is not supported. Please upload one PDF bank statement at a time, or up to {max_jpg_limit} JPG/JPEG images in a batch."
+        )
+
+    if len(image_files) > max_jpg_limit:
+        role_desc = "Administrators" if is_admin else "Normal users"
+        raise HTTPException(
+            status_code=400,
+            detail=f"Upload limit exceeded: {role_desc} can upload up to {max_jpg_limit} JPG/JPEG images per batch. "
+                   f"You selected {len(image_files)} images. Please reduce your selection to {max_jpg_limit} images or fewer."
+        )
+
+    is_image = len(image_files) > 0
     is_encrypted = False
+    image_tuples: List[Tuple[str, bytes]] = []
 
-    # 1. Validate file structure, size limits, and encryption
     if is_image:
-        validate_image_file(saved_file_path)
-        page_count = 1
+        file_ext = "jpg"
+        page_count = len(image_files)
+        saved_image_paths = []
+
+        for idx, img_file in enumerate(image_files):
+            saved_path = os.path.join(CONVERSION_STORAGE_DIR, f"{job_id}_page_{idx+1}.jpg")
+            img_content = await img_file.read()
+            with open(saved_path, "wb") as f_out:
+                f_out.write(img_content)
+            validate_image_file(saved_path)
+            saved_image_paths.append(saved_path)
+            image_tuples.append((img_file.filename or f"image_{idx+1}.jpg", img_content))
+
+        saved_file_path = saved_image_paths[0]
+        orig_filename = image_files[0].filename or "image.jpg"
+        if len(image_files) > 1:
+            orig_filename = f"{len(image_files)} images ({image_files[0].filename}, ...)"
+        content = image_tuples[0][1]
     else:
+        file_ext = "pdf"
+        target_file = pdf_files[0]
+        orig_filename = target_file.filename or "statement.pdf"
+        saved_file_path = os.path.join(CONVERSION_STORAGE_DIR, f"{job_id}.pdf")
+        content = await target_file.read()
+        with open(saved_file_path, "wb") as f_out:
+            f_out.write(content)
         page_count, is_encrypted = validate_pdf_file(saved_file_path, password=password)
+
+    app_logger.info(f"Starting conversion job {job_id} ({file_ext.upper()}, {page_count} pages) for user {current_user.email}, file: {orig_filename}")
 
     # 2. Check available page limit (Free Daily Quota + Additional Purchased Balance)
     usage = get_user_usage_data(current_user)
     is_unlimited = usage.is_unlimited or current_user.has_quota_bypass or current_user.is_admin or current_user.role in ("ADMIN", "SUPER_ADMIN")
+
+    # Enforce subscription monthly bill limits (PRD Section 2)
+    sub_limit = usage.subscription_bill_limit
+    if sub_limit is not None and not (current_user.is_admin or current_user.role in ("ADMIN", "SUPER_ADMIN")):
+        if sub_limit == -1 or current_user.is_unlimited:
+            # Premium Plan: genuine unlimited conversions without fixed cap
+            is_unlimited = True
+        else:
+            # Basic (50 bills) & Standard (150 bills) plans: check converted bill count
+            mem = db.get_active_staff_membership(current_user.id, current_user.email)
+            since_time = mem.get("membership_started_at") if mem else None
+            bills_used = db.get_user_bills_converted_since(current_user.id, since_time)
+            if bills_used >= sub_limit:
+                app_logger.warning(f"Subscription bill conversion limit reached for {current_user.email}: {bills_used}/{sub_limit} bills")
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail=f"Your {usage.subscription_plan_name or 'subscription'} monthly bill conversion limit of {sub_limit} bills has been reached. Please upgrade to Standard or Premium for higher limits."
+                )
+            is_unlimited = True
     
     remaining_free = usage.pages_remaining_today if not is_unlimited else 999999
     additional_bal = get_user_additional_pages(current_user) if not is_unlimited else 0
@@ -404,19 +484,25 @@ async def upload_statement(
         # JPG / JPEG Statements are parsed with Gemini Multimodal AI
         if GeminiExtractor.is_available():
             try:
-                statement = GeminiExtractor.extract_from_image_bytes(content, mime_type="image/jpeg")
+                images_to_extract = image_tuples[:pages_to_process]
+                if len(images_to_extract) == 1:
+                    statement = GeminiExtractor.extract_from_image_bytes(images_to_extract[0][1], mime_type="image/jpeg")
+                else:
+                    statement = GeminiExtractor.extract_from_multiple_image_bytes(images_to_extract, mime_type="image/jpeg")
+
                 if statement and len(statement.transactions) > 0:
                     extraction_engine = "gemini"
                     detected_bank_name = statement.bank or "Bank Account"
                     account_num = statement.account_number_masked
-                    detection_reasons = ["Extracted via Gemini Vision OCR"]
+                    detection_reasons = [f"Extracted via Gemini Vision OCR ({len(images_to_extract)} images batch)"]
+                    parser_name = f"Gemini Vision Engine ({len(images_to_extract)} images)"
             except Exception as _gem_err:
                 app_logger.warning(f"Gemini image extraction error: {_gem_err}")
 
         if not statement or len(statement.transactions) == 0:
             raise InvalidPDFException(
-                "Unable to extract readable transactions from the uploaded image. "
-                "Please verify that the bank statement photo is clear, focused, and not blurry."
+                "Unable to extract readable transactions from the uploaded image(s). "
+                "Please verify that the bank statement photo(s) are clear, focused, and not blurry."
             )
     else:
         # PDF Statements: Extract text & layout
@@ -618,7 +704,7 @@ async def upload_statement(
     job_record = {
         "id": job_id,
         "user_id": current_user.id,
-        "file_name": file.filename or "statement.pdf",
+        "file_name": orig_filename,
         "pdf_path": saved_file_path,
         "password": password,
         "bank_name": detected_bank_name,

@@ -64,6 +64,7 @@ import {
   ImportedGroup,
   getAuthToken,
   setAuthToken,
+  getUserRole,
   downloadFileBlob,
   getPaymentConfig,
   submitPaymentRequest,
@@ -106,8 +107,10 @@ export default function ConvertPage() {
   const [userBankLedgers, setUserBankLedgers] = useState<ImportedLedger[]>([]);
   const [isLedgerModalOpen, setIsLedgerModalOpen] = useState(false);
   
-  // File & Encryption
-  const [file, setFile] = useState<File | null>(null);
+  // File & Encryption (Single PDF or Multi-JPG batch)
+  const [files, setFiles] = useState<File[]>([]);
+  const file = files[0] || null;
+  const setFile = (f: File | null) => setFiles(f ? [f] : []);
   const [password, setPassword] = useState('');
   const [showPasswordModal, setShowPasswordModal] = useState(false);
   const [modalPasswordError, setModalPasswordError] = useState('');
@@ -223,52 +226,119 @@ export default function ConvertPage() {
     e.preventDefault();
     e.stopPropagation();
     setDragActive(false);
-    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
-      handleFileSelected(e.dataTransfer.files[0]);
+    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+      handleFilesSelected(Array.from(e.dataTransfer.files));
     }
   };
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files[0]) {
-      handleFileSelected(e.target.files[0]);
+    if (e.target.files && e.target.files.length > 0) {
+      handleFilesSelected(Array.from(e.target.files));
     }
   };
 
-  const handleFileSelected = (selectedFile: File) => {
-    const fileNameLower = selectedFile.name.toLowerCase();
-    const isPdf = fileNameLower.endsWith('.pdf');
-    const isImage = fileNameLower.endsWith('.jpg') || fileNameLower.endsWith('.jpeg');
+  const handleFilesSelected = (selectedFiles: File[]) => {
+    if (!selectedFiles || selectedFiles.length === 0) return;
 
-    if (!isPdf && !isImage) {
-      setErrorMsg('Unsupported file type. Please upload a PDF, JPG, or JPEG bank statement.');
+    const isEffectiveAdmin = Boolean(isAdmin || getUserRole() === 'ADMIN' || usage?.is_unlimited);
+    const maxAllowedJpg = isEffectiveAdmin ? 50 : 10;
+    const roleName = isEffectiveAdmin ? 'Administrators' : 'Normal users';
+
+    const pdfFiles: File[] = [];
+    const imageFiles: File[] = [];
+    const invalidFiles: string[] = [];
+
+    for (const f of selectedFiles) {
+      const fileNameLower = f.name.toLowerCase();
+      const isPdf = fileNameLower.endsWith('.pdf');
+      const isImage = fileNameLower.endsWith('.jpg') || fileNameLower.endsWith('.jpeg');
+      if (isPdf) {
+        pdfFiles.push(f);
+      } else if (isImage) {
+        imageFiles.push(f);
+      } else {
+        invalidFiles.push(f.name);
+      }
+    }
+
+    if (invalidFiles.length > 0) {
+      setErrorMsg(`Unsupported file type (${invalidFiles.join(', ')}). Please upload a PDF, JPG, or JPEG bank statement.`);
+      setFiles([]);
       return;
     }
 
-    const maxSizeBytes = isImage ? 10 * 1024 * 1024 : 25 * 1024 * 1024;
-    if (selectedFile.size > maxSizeBytes) {
-      setErrorMsg(
-        isImage
-          ? 'File too large. Image statements (JPG/JPEG) must be under 10 MB.'
-          : 'File too large. PDF statements must be under 25 MB.'
-      );
+    if (pdfFiles.length > 0 && imageFiles.length > 0) {
+      setErrorMsg('Mixed file types are not supported. Please upload either a single PDF document or a batch of JPG/JPEG images.');
+      setFiles([]);
       return;
     }
 
-    setFile(selectedFile);
-    setErrorMsg('');
+    if (pdfFiles.length > 1) {
+      setErrorMsg(`Multiple PDF upload is not supported. Please upload one PDF bank statement at a time, or up to ${maxAllowedJpg} JPG/JPEG images in a batch.`);
+      setFiles([]);
+      return;
+    }
+
+    if (pdfFiles.length === 1) {
+      const targetPdf = pdfFiles[0];
+      if (targetPdf.size > 25 * 1024 * 1024) {
+        setErrorMsg('File too large. PDF statements must be under 25 MB.');
+        setFiles([]);
+        return;
+      }
+      setFiles([targetPdf]);
+      setErrorMsg('');
+      return;
+    }
+
+    if (imageFiles.length > 0) {
+      if (imageFiles.length > maxAllowedJpg) {
+        setErrorMsg(
+          `Upload limit exceeded: ${roleName} can upload up to ${maxAllowedJpg} JPG/JPEG images per batch. ` +
+          `You selected ${imageFiles.length} images. Please reduce your selection to ${maxAllowedJpg} images or fewer.`
+        );
+        setFiles([]);
+        return;
+      }
+
+      const oversizedImages = imageFiles.filter((img) => img.size > 10 * 1024 * 1024);
+      if (oversizedImages.length > 0) {
+        setErrorMsg(
+          `File too large: ${oversizedImages.map((f) => f.name).join(', ')}. Image statements (JPG/JPEG) must be under 10 MB each.`
+        );
+        setFiles([]);
+        return;
+      }
+
+      setFiles(imageFiles);
+      setErrorMsg('');
+      return;
+    }
   };
 
   const startConversion = async (pdfPassword?: string) => {
-    if (!file) return;
+    if (files.length === 0) return;
     setErrorMsg('');
     setCurrentStep(2);
-    const isImage = /\.(jpe?g)$/i.test(file.name);
-    setProcessingStep(isImage ? 'Analyzing statement with Gemini AI vision...' : 'Analyzing PDF structure & checking page quota...');
+    const isImage = files.some(f => /\.(jpe?g)$/i.test(f.name));
+    setProcessingStep(
+      isImage
+        ? (files.length > 1
+            ? `Analyzing ${files.length} statement photos with Gemini AI vision...`
+            : 'Analyzing statement with Gemini AI vision...')
+        : 'Analyzing PDF structure & checking page quota...'
+    );
 
     try {
       setTimeout(() => {
         setCurrentStep(3);
-        setProcessingStep(isImage ? 'Extracting transactions & verifying running balance math...' : 'Detecting bank signature & column boundaries...');
+        setProcessingStep(
+          isImage
+            ? (files.length > 1
+                ? `Extracting transactions across ${files.length} images & verifying running balance math...`
+                : 'Extracting transactions & verifying running balance math...')
+            : 'Detecting bank signature & column boundaries...'
+        );
       }, 700);
 
       setTimeout(() => {
@@ -276,7 +346,7 @@ export default function ConvertPage() {
       }, 1400);
 
       const jobData = await uploadStatementPdf(
-        file, 
+        files.length > 1 ? files : files[0], 
         pdfPassword || password, 
         bankOverride,
         bankLedgerName,
@@ -1158,6 +1228,7 @@ export default function ConvertPage() {
               <input
                 ref={fileInputRef}
                 type="file"
+                multiple
                 accept=".pdf,.jpg,.jpeg,application/pdf,image/jpeg"
                 className="hidden"
                 onChange={handleFileChange}
@@ -1170,22 +1241,37 @@ export default function ConvertPage() {
                 <UploadCloud className={`w-10 h-10 ${dragActive ? 'animate-bounce' : ''}`} />
               </div>
               <h2 className="text-xl font-bold text-slate-900 mb-2 relative z-10 tracking-tight">
-                {file ? (
+                {files.length > 1 ? (
+                  <span className="text-brand-700 flex items-center justify-center gap-2">
+                    <Layers className="w-5 h-5 text-brand-600" />
+                    <span>Batch: {files.length} JPG Images Selected</span>
+                  </span>
+                ) : file ? (
                   <span className="text-brand-700 flex items-center justify-center gap-2">
                     <FileText className="w-5 h-5" /> {file.name}
                   </span>
                 ) : 'Upload Bank Statement (PDF, JPG, JPEG)'}
               </h2>
               <p className="text-xs text-slate-500 max-w-sm mx-auto mb-6 leading-relaxed relative z-10">
-                Drag and drop your statement PDF, JPG, or JPEG photo here, or <span className="text-brand-600 font-semibold group-hover:underline">browse files</span> from your device
+                {files.length > 1 ? (
+                  <span>
+                    Ready to convert {files.length} images as a single multi-page statement. Click below to start conversion, or click here to choose different files.
+                  </span>
+                ) : (
+                  <>
+                    Drag and drop your statement PDF, JPG, or JPEG photo here, or <span className="text-brand-600 font-semibold group-hover:underline">browse files</span> from your device
+                  </>
+                )}
               </p>
               
-              <div className="inline-flex items-center gap-3 px-4 py-2 rounded-xl bg-slate-100/80 text-[11px] font-bold text-slate-600 relative z-10 border border-slate-200 shadow-xs">
+              <div className="inline-flex flex-wrap items-center justify-center gap-3 px-4 py-2 rounded-xl bg-slate-100/80 text-[11px] font-bold text-slate-600 relative z-10 border border-slate-200 shadow-xs">
                 <span className="flex items-center gap-1.5"><Building2 className="w-3.5 h-3.5 text-slate-400" /> 38+ Banks</span>
                 <span className="w-1 h-1 rounded-full bg-slate-300" />
-                <span className="flex items-center gap-1.5"><Layers className="w-3.5 h-3.5 text-slate-400" /> PDF / JPG / JPEG</span>
+                <span className="flex items-center gap-1.5"><Layers className="w-3.5 h-3.5 text-slate-400" /> PDF / Multi-JPG</span>
                 <span className="w-1 h-1 rounded-full bg-slate-300" />
                 <span className="flex items-center gap-1.5"><Sparkles className="w-3.5 h-3.5 text-slate-400" /> Gemini AI Powered</span>
+                <span className="w-1 h-1 rounded-full bg-slate-300" />
+                <span className="text-brand-700 font-medium">Batch Limit: {isAdmin || getUserRole() === 'ADMIN' ? '50 Images (Admin)' : '10 Images (User)'}</span>
               </div>
             </div>
 
@@ -1251,15 +1337,24 @@ export default function ConvertPage() {
               </select>
             </Card>
 
-            {file && (
-              <div className="text-center pt-2">
+            {files.length > 0 && (
+              <div className="text-center pt-2 flex flex-col sm:flex-row items-center justify-center gap-3">
                 <Button
                   variant="primary"
                   size="lg"
                   onClick={() => startConversion()}
                   iconRight={<ArrowRight className="w-4 h-4" />}
                 >
-                  Start Bank Statement Conversion
+                  {files.length > 1
+                    ? `Start Batch Conversion (${files.length} Images)`
+                    : 'Start Bank Statement Conversion'}
+                </Button>
+                <Button
+                  variant="outline"
+                  size="md"
+                  onClick={() => setFiles([])}
+                >
+                  Clear Selection
                 </Button>
               </div>
             )}
