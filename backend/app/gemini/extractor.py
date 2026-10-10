@@ -118,9 +118,9 @@ class GeminiExtractor:
 
     AVAILABLE_MODELS = [
         "gemini-3.5-flash",
-        "gemini-flash-latest",
+        "gemini-3.5-flash-lite",
         "gemini-3.7-flash",
-        "gemini-2.5-pro",
+        "gemini-flash-latest",
         "gemini-pro-latest"
     ]
 
@@ -145,8 +145,13 @@ class GeminiExtractor:
         preferred_model = model_name or settings.gemini_model or "gemini-3.5-flash"
         models_to_try = [preferred_model] + [m for m in cls.AVAILABLE_MODELS if m != preferred_model]
 
+        headers = {
+            "x-goog-api-key": api_key,
+            "Content-Type": "application/json"
+        }
+
         for model in models_to_try:
-            url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
             payload = {
                 "contents": contents,
                 "generationConfig": {
@@ -157,7 +162,7 @@ class GeminiExtractor:
 
             try:
                 with httpx.Client(timeout=timeout_seconds) as client:
-                    resp = client.post(url, json=payload)
+                    resp = client.post(url, headers=headers, json=payload)
                     if resp.status_code == 200:
                         data = resp.json()
                         candidates = data.get("candidates", [])

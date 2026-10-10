@@ -608,7 +608,7 @@ async def upload_statement(
         "id": job_id,
         "user_id": current_user.id,
         "file_name": file.filename or "statement.pdf",
-        "pdf_path": saved_pdf_path,
+        "pdf_path": saved_file_path,
         "password": password,
         "bank_name": detected_bank_name,
         "statement_format": detected_format,
