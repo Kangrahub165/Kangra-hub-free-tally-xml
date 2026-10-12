@@ -4,7 +4,8 @@ import json
 import uuid
 import logging
 import threading
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
+import pytz
 from decimal import Decimal
 from typing import Dict, Any, List, Optional
 
@@ -152,6 +153,104 @@ def init_db():
             );
             """)
 
+            # 8. Subscription Plan Configurations Table (PRD Section 1 & 2)
+            cursor.execute("""
+            CREATE TABLE IF NOT EXISTS subscription_plan_configs (
+                plan_id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                price_inr REAL NOT NULL,
+                price_paise INTEGER NOT NULL,
+                bills_limit INTEGER NOT NULL,
+                duration_days INTEGER DEFAULT 30,
+                is_unlimited INTEGER DEFAULT 0,
+                description TEXT,
+                created_at TEXT,
+                updated_at TEXT
+            );
+            """)
+
+            # 9. Membership Payments Table (PRD Section 3 - Razorpay & Subscription Payments)
+            cursor.execute("""
+            CREATE TABLE IF NOT EXISTS membership_payments (
+                id TEXT PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                user_email TEXT NOT NULL,
+                user_name TEXT,
+                customer_phone TEXT,
+                payment_id TEXT UNIQUE NOT NULL,
+                order_id TEXT,
+                payment_amount REAL NOT NULL,
+                amount_paise INTEGER NOT NULL,
+                payment_status TEXT NOT NULL,
+                payment_verified_at TEXT NOT NULL,
+                captured_at TEXT,
+                plan_id TEXT DEFAULT 'basic',
+                plan_name TEXT DEFAULT 'Basic',
+                bills_limit INTEGER DEFAULT 50,
+                duration_days INTEGER DEFAULT 30,
+                created_at TEXT NOT NULL
+            );
+            """)
+
+            # 10. Staff Memberships Table (Persistent subscription state per firm)
+            cursor.execute("""
+            CREATE TABLE IF NOT EXISTS staff_memberships (
+                id TEXT PRIMARY KEY,
+                user_id TEXT UNIQUE NOT NULL,
+                user_email TEXT NOT NULL,
+                user_name TEXT,
+                role TEXT DEFAULT 'STAFF',
+                is_unlimited INTEGER DEFAULT 0,
+                plan_id TEXT DEFAULT 'basic',
+                plan_name TEXT DEFAULT 'Basic',
+                bills_limit INTEGER DEFAULT 50,
+                membership_started_at TEXT,
+                membership_expires_at TEXT NOT NULL,
+                last_valid_day TEXT,
+                last_payment_id TEXT,
+                is_active INTEGER DEFAULT 1,
+                price_paid_inr REAL DEFAULT 199.0,
+                created_at TEXT,
+                updated_at TEXT
+            );
+            """)
+
+            # 11. Membership Renewal History
+            cursor.execute("""
+            CREATE TABLE IF NOT EXISTS membership_renewal_history (
+                id TEXT PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                payment_id TEXT NOT NULL,
+                renewal_type TEXT NOT NULL,
+                previous_expiry TEXT,
+                new_expiry TEXT NOT NULL,
+                days_added INTEGER DEFAULT 30,
+                created_at TEXT NOT NULL
+            );
+            """)
+
+            # Schema migrations for users table (subscription columns)
+            try:
+                cursor.execute("ALTER TABLE users ADD COLUMN subscription_plan_id TEXT;")
+            except Exception:
+                pass
+            try:
+                cursor.execute("ALTER TABLE users ADD COLUMN subscription_bill_limit INTEGER DEFAULT 0;")
+            except Exception:
+                pass
+            try:
+                cursor.execute("ALTER TABLE users ADD COLUMN subscription_expiry TEXT;")
+            except Exception:
+                pass
+            try:
+                cursor.execute("ALTER TABLE users ADD COLUMN is_gold INTEGER DEFAULT 0;")
+            except Exception:
+                pass
+            try:
+                cursor.execute("ALTER TABLE users ADD COLUMN staff_source TEXT;")
+            except Exception:
+                pass
+
             # Indexes for ultra-fast querying
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_daily_usage_user_date ON daily_usage(user_id, date_str);")
@@ -162,8 +261,13 @@ def init_db():
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_payment_requests_created_at ON payment_requests(created_at);")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_audit_log_user_id ON page_credit_audit_log(user_id);")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_audit_log_timestamp ON page_credit_audit_log(timestamp);")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_mem_payments_user ON membership_payments(user_id);")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_staff_memberships_user ON staff_memberships(user_id);")
 
             conn.commit()
+
+            # Seed default subscription plans (Basic ₹199/50 bills, Standard ₹299/150 bills, Premium ₹499/Unlimited)
+            _seed_default_subscription_plans(cursor)
 
             # Seed standard platform users if not present
             _seed_default_users(cursor)
@@ -260,6 +364,36 @@ def _seed_default_users(cursor: sqlite3.Cursor):
                 d["id"], d["email"], d["full_name"], d["username"], d["mobile_number"],
                 d["role"], d["is_unlimited"], d["account_status"], d["email_verified"],
                 d["mobile_verified"], d["registration_date"], now_iso, now_iso, now_iso
+            ))
+
+def _seed_default_subscription_plans(cursor: sqlite3.Cursor):
+    """
+    Seeds baseline plans per PRD:
+    - Basic: ₹199 (50 bills / month)
+    - Standard: ₹299 (150 bills / month)
+    - Premium: ₹499 (Unlimited bills / month)
+    Zero tax labels, exact pricing.
+    """
+    from app.core.plans import DEFAULT_SUBSCRIPTION_PLANS
+    now_iso = datetime.now(timezone.utc).isoformat()
+    for p in DEFAULT_SUBSCRIPTION_PLANS:
+        cursor.execute("SELECT plan_id FROM subscription_plan_configs WHERE plan_id = ?", (p["id"],))
+        if not cursor.fetchone():
+            cursor.execute("""
+            INSERT INTO subscription_plan_configs (
+                plan_id, name, price_inr, price_paise, bills_limit, duration_days, is_unlimited, description, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                p["id"],
+                p["name"],
+                p["price_inr"],
+                p["price_paise"],
+                p["bills_limit"],
+                p["duration_days"],
+                1 if p["is_unlimited"] else 0,
+                p.get("tagline", ""),
+                now_iso,
+                now_iso
             ))
 
 # ============================================================================
@@ -1039,5 +1173,333 @@ def get_page_credit_audit_logs(user_id: Optional[str] = None) -> List[Dict[str, 
         finally:
             conn.close()
 
+# ============================================================================
+# SUBSCRIPTION & PAYMENT OPERATIONS (PRD Section 1 & 2)
+# ============================================================================
+
+def get_all_subscription_plan_configs() -> Dict[str, Dict[str, Any]]:
+    """Returns all subscription plan configs from SQLite."""
+    with _LOCK:
+        conn = _get_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM subscription_plan_configs")
+            return {r["plan_id"]: dict(r) for r in cursor.fetchall()}
+        except Exception:
+            return {}
+        finally:
+            conn.close()
+
+def upsert_subscription_plan_config(
+    plan_id: str,
+    name: Optional[str] = None,
+    price_inr: Optional[float] = None,
+    bills_limit: Optional[int] = None,
+    duration_days: int = 30,
+    description: Optional[str] = None
+) -> Dict[str, Any]:
+    """Updates or inserts a plan configuration."""
+    from app.core.plans import DEFAULT_SUBSCRIPTION_PLANS, resolve_plan_id
+    canonical = resolve_plan_id(plan_id)
+    def_plan = next((p for p in DEFAULT_SUBSCRIPTION_PLANS if p["id"] == canonical), DEFAULT_SUBSCRIPTION_PLANS[0])
+
+    effective_name = name or def_plan["name"]
+    effective_price = price_inr if price_inr is not None else def_plan["price_inr"]
+    effective_limit = bills_limit if bills_limit is not None else def_plan["bills_limit"]
+    price_paise = int(round(effective_price * 100))
+    is_unlim = 1 if effective_limit == -1 else 0
+    now_iso = datetime.now(timezone.utc).isoformat()
+
+    with _LOCK:
+        conn = _get_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute("""
+            INSERT INTO subscription_plan_configs (
+                plan_id, name, price_inr, price_paise, bills_limit,
+                duration_days, is_unlimited, description, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(plan_id) DO UPDATE SET
+                name = excluded.name,
+                price_inr = excluded.price_inr,
+                price_paise = excluded.price_paise,
+                bills_limit = excluded.bills_limit,
+                duration_days = excluded.duration_days,
+                is_unlimited = excluded.is_unlimited,
+                description = coalesce(excluded.description, subscription_plan_configs.description),
+                updated_at = excluded.updated_at
+            """, (
+                canonical, effective_name, effective_price, price_paise, effective_limit,
+                duration_days, is_unlim, description, now_iso, now_iso
+            ))
+            conn.commit()
+            return {
+                "plan_id": canonical,
+                "name": effective_name,
+                "price_inr": effective_price,
+                "price_paise": price_paise,
+                "bills_limit": effective_limit,
+                "duration_days": duration_days,
+                "is_unlimited": bool(is_unlim)
+            }
+        finally:
+            conn.close()
+
+def get_staff_membership_with_status_eval(
+    user_id: str,
+    user_email: Optional[str] = None,
+    server_now_utc: Optional[datetime] = None
+) -> Optional[Dict[str, Any]]:
+    """Evaluates membership status against server time."""
+    now = server_now_utc or datetime.now(timezone.utc)
+    with _LOCK:
+        conn = _get_connection()
+        try:
+            cursor = conn.cursor()
+            if user_email:
+                cursor.execute("""
+                SELECT * FROM staff_memberships 
+                WHERE user_id = ? OR LOWER(user_email) = ?
+                """, (user_id, user_email.strip().lower()))
+            else:
+                cursor.execute("SELECT * FROM staff_memberships WHERE user_id = ?", (user_id,))
+            row = cursor.fetchone()
+            if not row:
+                return None
+            m = dict(row)
+            try:
+                exp_dt = datetime.fromisoformat(m["membership_expires_at"].replace("Z", "+00:00"))
+                is_active = (now <= exp_dt)
+            except Exception:
+                is_active = bool(m.get("is_active", 0))
+
+            m["is_active"] = is_active
+            return m
+        finally:
+            conn.close()
+
+def get_active_staff_membership(user_id: str, user_email: Optional[str] = None) -> Optional[Dict[str, Any]]:
+    """Returns active subscription / staff membership if active, else None."""
+    mem = get_staff_membership_with_status_eval(user_id, user_email=user_email)
+    if mem and mem.get("is_active"):
+        return mem
+    return None
+
+def process_verified_membership_payment(
+    user_id: str,
+    user_email: str,
+    user_name: Optional[str],
+    payment_id: str,
+    order_id: Optional[str],
+    amount_paise: int,
+    payment_status: str,
+    captured_at_utc: datetime,
+    verified_at_utc: datetime,
+    plan_id: Optional[str] = "basic",
+    customer_phone: Optional[str] = None,
+    duration_days: int = 30
+) -> Dict[str, Any]:
+    """
+    Idempotent, atomic transaction activating a user subscription per firm.
+    Enforces exact plan price (no tax added), bill limits, and 30-day IST midnight validity.
+    """
+    from app.core.plans import get_plan_by_id, resolve_plan_id
+    canonical_plan_id = resolve_plan_id(plan_id)
+    plan_info = get_plan_by_id(canonical_plan_id)
+    effective_bills_limit = plan_info["bills_limit"]
+    effective_is_unlimited = plan_info["is_unlimited"]
+    effective_plan_name = plan_info["name"]
+    effective_price_inr = plan_info["price_inr"]
+
+    clean_pid = payment_id.strip()
+    now_iso = datetime.now(timezone.utc).isoformat()
+    tz_ist = pytz.timezone("Asia/Kolkata")
+    now_ist = datetime.now(tz_ist)
+
+    with _LOCK:
+        conn = _get_connection()
+        try:
+            cursor = conn.cursor()
+
+            # 1. Idempotency Check: prevent duplicate activation
+            cursor.execute("SELECT * FROM membership_payments WHERE payment_id = ?", (clean_pid,))
+            existing_pay = cursor.fetchone()
+            if existing_pay:
+                cursor.execute("SELECT * FROM staff_memberships WHERE user_id = ?", (user_id,))
+                existing_mem = cursor.fetchone()
+                mem_dict = dict(existing_mem) if existing_mem else {}
+                return {
+                    "success": True,
+                    "idempotent": True,
+                    "message": f"Payment {clean_pid} already processed. Subscription active.",
+                    "plan_id": canonical_plan_id,
+                    "plan_name": effective_plan_name,
+                    "bills_limit": effective_bills_limit,
+                    "is_unlimited": effective_is_unlimited,
+                    "membership_expires_at": mem_dict.get("membership_expires_at"),
+                    "last_valid_day": mem_dict.get("last_valid_day"),
+                    "payment_id": clean_pid
+                }
+
+            # 2. Check existing active subscription to compute expiry extension
+            cursor.execute("SELECT * FROM staff_memberships WHERE user_id = ?", (user_id,))
+            current_mem = cursor.fetchone()
+
+            previous_expiry_iso = None
+            renewal_type = "INITIAL"
+
+            if current_mem and current_mem["membership_expires_at"]:
+                try:
+                    prev_exp = datetime.fromisoformat(current_mem["membership_expires_at"].replace("Z", "+00:00"))
+                    prev_exp_ist = prev_exp.astimezone(tz_ist)
+                    if prev_exp_ist > now_ist:
+                        # Active: extend from existing expiry date
+                        base_date = prev_exp_ist
+                        renewal_type = "RENEWAL"
+                    else:
+                        base_date = now_ist
+                        renewal_type = "REACTIVATION"
+                    previous_expiry_iso = current_mem["membership_expires_at"]
+                except Exception:
+                    base_date = now_ist
+            else:
+                base_date = now_ist
+
+            # Calculate new expiry: base_date + duration_days snapped to 23:59:59 IST
+            target_date = base_date + timedelta(days=duration_days)
+            new_expiry_ist = target_date.replace(hour=23, minute=59, second=59, microsecond=0)
+            new_expiry_utc = new_expiry_ist.astimezone(timezone.utc)
+            new_expiry_iso = new_expiry_utc.isoformat()
+            last_valid_day = new_expiry_ist.strftime("%d %b %Y")
+            display_wording = f"Valid through {last_valid_day} until 11:59 PM IST"
+
+            # 3. Insert membership payment record
+            pay_uuid = f"mpay-{uuid.uuid4().hex[:12]}"
+            cursor.execute("""
+            INSERT INTO membership_payments (
+                id, user_id, user_email, user_name, customer_phone, payment_id,
+                order_id, payment_amount, amount_paise, payment_status,
+                payment_verified_at, captured_at, plan_id, plan_name,
+                bills_limit, duration_days, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                pay_uuid, user_id, user_email, user_name, customer_phone, clean_pid,
+                order_id, effective_price_inr, amount_paise, payment_status,
+                verified_at_utc.isoformat(), captured_at_utc.isoformat(),
+                canonical_plan_id, effective_plan_name, effective_bills_limit,
+                duration_days, now_iso
+            ))
+
+            # 4. Upsert staff_memberships table
+            mem_uuid = f"smem-{uuid.uuid4().hex[:12]}"
+            started_at_iso = (current_mem["membership_started_at"] if current_mem else None) or now_iso
+            if current_mem:
+                cursor.execute("""
+                UPDATE staff_memberships SET
+                    user_email = ?, user_name = ?, plan_id = ?, plan_name = ?,
+                    bills_limit = ?, is_unlimited = ?, membership_expires_at = ?,
+                    last_valid_day = ?, last_payment_id = ?, is_active = 1,
+                    price_paid_inr = ?, updated_at = ?
+                WHERE user_id = ?
+                """, (
+                    user_email, user_name, canonical_plan_id, effective_plan_name,
+                    effective_bills_limit, 1 if effective_is_unlimited else 0,
+                    new_expiry_iso, last_valid_day, clean_pid, effective_price_inr,
+                    now_iso, user_id
+                ))
+            else:
+                cursor.execute("""
+                INSERT INTO staff_memberships (
+                    id, user_id, user_email, user_name, role, is_unlimited,
+                    plan_id, plan_name, bills_limit, membership_started_at,
+                    membership_expires_at, last_valid_day, last_payment_id,
+                    is_active, price_paid_inr, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, 'STAFF', ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)
+                """, (
+                    mem_uuid, user_id, user_email, user_name,
+                    1 if effective_is_unlimited else 0, canonical_plan_id,
+                    effective_plan_name, effective_bills_limit, started_at_iso,
+                    new_expiry_iso, last_valid_day, clean_pid, effective_price_inr,
+                    now_iso, now_iso
+                ))
+
+            # 5. Insert renewal history log
+            ren_uuid = f"ren-{uuid.uuid4().hex[:12]}"
+            cursor.execute("""
+            INSERT INTO membership_renewal_history (
+                id, user_id, payment_id, renewal_type, previous_expiry,
+                new_expiry, days_added, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                ren_uuid, user_id, clean_pid, renewal_type,
+                previous_expiry_iso, new_expiry_iso, duration_days, now_iso
+            ))
+
+            # 6. Update users table with plan details
+            clean_email_lower = user_email.strip().lower()
+            cursor.execute("""
+            UPDATE users SET
+                role = 'STAFF',
+                staff_source = 'SUBSCRIPTION_PURCHASE',
+                is_gold = 1,
+                is_unlimited = ?,
+                subscription_plan_id = ?,
+                subscription_bill_limit = ?,
+                subscription_expiry = ?,
+                updated_at = ?
+            WHERE id = ? OR LOWER(email) = ?
+            """, (
+                1 if effective_is_unlimited else 0,
+                canonical_plan_id,
+                effective_bills_limit,
+                new_expiry_iso,
+                now_iso,
+                user_id,
+                clean_email_lower
+            ))
+
+            conn.commit()
+
+            return {
+                "success": True,
+                "idempotent": False,
+                "message": f"{effective_plan_name} subscription successfully activated! {display_wording}",
+                "renewal_type": renewal_type,
+                "plan_id": canonical_plan_id,
+                "plan_name": effective_plan_name,
+                "bills_limit": effective_bills_limit,
+                "is_unlimited": effective_is_unlimited,
+                "membership_expires_at": new_expiry_iso,
+                "last_valid_day": last_valid_day,
+                "display_wording": display_wording,
+                "payment_id": clean_pid
+            }
+        finally:
+            conn.close()
+
+def get_user_bills_converted_since(user_id: str, start_date_iso: Optional[str] = None) -> int:
+    """Returns count of bank statement / bill conversions completed by this user since start_date_iso."""
+    if not user_id:
+        return 0
+    with _LOCK:
+        conn = _get_connection()
+        try:
+            cursor = conn.cursor()
+            if start_date_iso:
+                cursor.execute("""
+                    SELECT COUNT(*) as cnt FROM conversions
+                    WHERE (user_id = ? OR user_email = ?) AND created_at >= ? AND status IN ('COMPLETED', 'PARTIALLY_COMPLETED')
+                """, (user_id, user_id, start_date_iso))
+            else:
+                cursor.execute("""
+                    SELECT COUNT(*) as cnt FROM conversions
+                    WHERE (user_id = ? OR user_email = ?) AND status IN ('COMPLETED', 'PARTIALLY_COMPLETED')
+                """, (user_id, user_id))
+            row = cursor.fetchone()
+            return int(row["cnt"]) if row and row["cnt"] is not None else 0
+        finally:
+            conn.close()
+
 # Auto-initialize database on import
 init_db()
+

@@ -39,6 +39,17 @@ class Settings(BaseSettings):
             self.supabase_service_role_key = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "").strip()
         else:
             self.supabase_service_role_key = self.supabase_service_role_key.strip()
+
+        env_cors = os.getenv("CORS_ORIGINS", "").strip() or os.getenv("ALLOWED_ORIGINS", "").strip()
+        if env_cors:
+            if not self.cors_origins:
+                self.cors_origins = env_cors
+            else:
+                self.cors_origins = f"{self.cors_origins},{env_cors}"
+            if not self.allowed_origins:
+                self.allowed_origins = env_cors
+            else:
+                self.allowed_origins = f"{self.allowed_origins},{env_cors}"
     frontend_url: str = "http://localhost:3000"
     admin_email: str = "admin@tallyxml.in"
     admin_recovery_email: str = "kangrahub@gmail.com"
@@ -91,6 +102,7 @@ class Settings(BaseSettings):
 
     # CORS Configuration
     allowed_origins: str = "https://kangrahubtallyxml.netlify.app,http://localhost:3000,http://127.0.0.1:3000"
+    cors_origins: str = ""
 
     # Google Gemini AI Integration (PRD Item 3)
     gemini_api_key: str = ""

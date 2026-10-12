@@ -1,6 +1,8 @@
+import os
 import uuid
+from typing import Optional
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, Request, status
+from fastapi import FastAPI, Request, Response, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
@@ -45,27 +47,60 @@ app = FastAPI(
     lifespan=lifespan
 )
 
-# Dynamic CORS Configuration from Environment & Settings (PRD Item 1)
+# Dynamic CORS Configuration from Environment & Settings (PRD Item 1 & Deployment Hardening)
 origins_set = {
     "https://kangrahubtallyxml.netlify.app",
+    "https://deploy-preview-1--kangrahubtallyxml.netlify.app",
     "http://localhost:3000",
     "http://127.0.0.1:3000",
     "http://localhost:8000",
     "http://127.0.0.1:8000",
 }
-if getattr(settings, "allowed_origins", None):
-    for raw_origin in settings.allowed_origins.split(","):
-        clean_orig = raw_origin.strip().rstrip("/")
-        if clean_orig:
-            origins_set.add(clean_orig)
 
-if settings.frontend_url:
-    clean_frontend_url = settings.frontend_url.strip().rstrip("/")
-    if clean_frontend_url:
-        origins_set.add(clean_frontend_url)
+# Collect all potential origin sources: CORS_ORIGINS, ALLOWED_ORIGINS, FRONTEND_URL, settings
+origin_sources = [
+    os.getenv("CORS_ORIGINS", ""),
+    os.getenv("ALLOWED_ORIGINS", ""),
+    os.getenv("FRONTEND_URL", ""),
+    getattr(settings, "cors_origins", ""),
+    getattr(settings, "allowed_origins", ""),
+    getattr(settings, "frontend_url", ""),
+]
+for src in origin_sources:
+    if src:
+        for raw_origin in str(src).split(","):
+            clean_orig = raw_origin.strip().rstrip("/")
+            if clean_orig:
+                origins_set.add(clean_orig)
 
 allowed_origins = sorted(list(origins_set))
 app_logger.info(f"CORS Allowed Origins: {allowed_origins}")
+
+def get_cors_origin_for_request(request: Request) -> Optional[str]:
+    origin = request.headers.get("origin")
+    if not origin:
+        return None
+    origin_clean = origin.strip().rstrip("/")
+    if origin in origins_set or origin_clean in origins_set:
+        return origin
+    if "netlify.app" in origin or "localhost" in origin or "127.0.0.1" in origin:
+        return origin
+    return None
+
+def apply_cors_headers(response: Response, request: Request) -> Response:
+    origin = get_cors_origin_for_request(request)
+    if origin:
+        response.headers["Access-Control-Allow-Origin"] = origin
+        response.headers["Access-Control-Allow-Credentials"] = "true"
+        response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS, PATCH, HEAD"
+        req_headers = request.headers.get(
+            "access-control-request-headers",
+            "Authorization, Content-Type, Accept, Origin, X-Requested-With, X-Total-Count"
+        )
+        response.headers["Access-Control-Allow-Headers"] = req_headers
+        response.headers["Access-Control-Expose-Headers"] = "Content-Disposition, Content-Type, Content-Length, X-Total-Count"
+        response.headers["Access-Control-Max-Age"] = "86400"
+    return response
 
 app.add_middleware(
     CORSMiddleware,
@@ -79,38 +114,48 @@ app.add_middleware(
 
 @app.middleware("http")
 async def ensure_cors_headers(request: Request, call_next):
-    """Guarantees CORS headers are attached on all responses, even on early errors or crashes."""
-    origin = request.headers.get("origin")
+    """Guarantees CORS headers are attached on all responses, including OPTIONS preflights and uncaught exceptions."""
     if request.method == "OPTIONS":
-        response = await call_next(request)
-        if origin and (origin in origins_set or "netlify.app" in origin or "localhost" in origin or "127.0.0.1" in origin):
-            response.headers["Access-Control-Allow-Origin"] = origin
-            response.headers["Access-Control-Allow-Credentials"] = "true"
-            response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS, PATCH, HEAD"
-            response.headers["Access-Control-Allow-Headers"] = request.headers.get("access-control-request-headers", "*")
-            response.headers["Access-Control-Max-Age"] = "600"
-        return response
+        resp = Response(status_code=200)
+        return apply_cors_headers(resp, request)
 
-    response = await call_next(request)
-    if origin and (origin in origins_set or "netlify.app" in origin or "localhost" in origin or "127.0.0.1" in origin):
-        response.headers["Access-Control-Allow-Origin"] = origin
-        response.headers["Access-Control-Allow-Credentials"] = "true"
-    return response
+    try:
+        response = await call_next(request)
+    except Exception as exc:
+        ref_id = f"KH-{uuid.uuid4().hex[:6].upper()}"
+        app_logger.error(f"Middleware caught unhandled exception (Ref: {ref_id}): {exc}", exc_info=True)
+        response = JSONResponse(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            content={
+                "error": True,
+                "message": "Something went wrong while processing your statement. Please try again or contact support.",
+                "code": "ERR_INTERNAL_SERVER_ERROR",
+                "reference_id": ref_id
+            }
+        )
+    return apply_cors_headers(response, request)
 
 # Global Exception Handlers
+@app.exception_handler(HTTPException)
+async def handle_http_exception(request: Request, exc: HTTPException):
+    content = exc.detail if isinstance(exc.detail, dict) else {"detail": exc.detail}
+    resp = JSONResponse(status_code=exc.status_code, content=content)
+    return apply_cors_headers(resp, request)
+
 @app.exception_handler(AppBaseException)
 async def handle_app_exception(request: Request, exc: AppBaseException):
     app_logger.warning(f"Handled error [{exc.internal_code}] (Ref: {exc.reference_id}): {exc.user_message}")
-    return JSONResponse(
+    resp = JSONResponse(
         status_code=exc.status_code,
         content=exc.detail
     )
+    return apply_cors_headers(resp, request)
 
 @app.exception_handler(Exception)
 async def handle_unexpected_exception(request: Request, exc: Exception):
     ref_id = f"KH-{uuid.uuid4().hex[:6].upper()}"
     app_logger.error(f"Unhandled exception (Ref: {ref_id}): {str(exc)}", exc_info=True)
-    return JSONResponse(
+    resp = JSONResponse(
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
         content={
             "error": True,
@@ -119,6 +164,7 @@ async def handle_unexpected_exception(request: Request, exc: Exception):
             "reference_id": ref_id
         }
     )
+    return apply_cors_headers(resp, request)
 
 # Register API routers
 app.include_router(system_router, prefix=settings.api_prefix)

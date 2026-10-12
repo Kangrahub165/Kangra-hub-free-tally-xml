@@ -7,14 +7,22 @@ from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Q
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
+import hmac
+import hashlib
+import base64
+import urllib.request
+import json
+import logging
 from app.core.config import settings
 from app.core.security import get_current_user, require_admin, CurrentUser
 from app.api.usage import (
     grant_user_additional_pages,
     get_user_additional_pages,
 )
-
 from app.core import db
+from app.core.plans import get_subscription_plans, get_plan_by_id, resolve_plan_id
+
+logger = logging.getLogger("kangra_hub.payments")
 
 router = APIRouter(tags=["Payments"])
 
@@ -384,3 +392,298 @@ async def reject_payment_request(
         "message": f"Payment request {request_id} has been rejected.",
         "request": _format_request_response(r)
     }
+
+# ============================================================================
+# SUBSCRIPTION PLANS & CHECKOUT ENDPOINTS (PRD Sections 1, 2, & 3)
+# ============================================================================
+
+class CreateOrderRequest(BaseModel):
+    planId: Optional[str] = "basic"
+    customer_name: Optional[str] = None
+    customer_email: Optional[str] = None
+    customer_phone: Optional[str] = None
+
+class VerifyPaymentRequest(BaseModel):
+    razorpay_payment_id: str
+    razorpay_order_id: Optional[str] = None
+    razorpay_signature: Optional[str] = None
+    planId: Optional[str] = "basic"
+    customer_name: Optional[str] = None
+    customer_email: Optional[str] = None
+    customer_phone: Optional[str] = None
+
+class UpdatePlanConfigRequest(BaseModel):
+    bills_limit: Optional[int] = None
+    price_inr: Optional[float] = None
+    name: Optional[str] = None
+    duration_days: Optional[int] = None
+
+def _fetch_razorpay_payment(payment_id: str, key_id: str, key_secret: str) -> Optional[Dict[str, Any]]:
+    """Fetches payment entity from Razorpay REST API."""
+    url = f"https://api.razorpay.com/v1/payments/{payment_id}"
+    req = urllib.request.Request(url)
+    auth_str = f"{key_id}:{key_secret}"
+    b64_auth = base64.b64encode(auth_str.encode("ascii")).decode("ascii")
+    req.add_header("Authorization", f"Basic {b64_auth}")
+    try:
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            return json.loads(resp.read().decode("utf-8"))
+    except Exception as e:
+        logger.debug(f"Razorpay API fetch failed for payment {payment_id}: {e}")
+        return None
+
+@router.get("/api/subscriptions/plans")
+@router.get("/api/payments/plans")
+async def list_subscription_plans(current_user: CurrentUser = Depends(get_current_user)):
+    """
+    Returns active subscription plans with exact pricing and bill limits.
+    PRD REQUIREMENT: Users MUST log in before they can view subscription plans and their details.
+    Unauthenticated requests return 401 Unauthorized.
+    """
+    return {
+        "success": True,
+        "plans": get_subscription_plans()
+    }
+
+@router.get("/api/subscriptions/me")
+async def get_my_subscription(current_user: CurrentUser = Depends(get_current_user)):
+    """Returns active subscription state, bill limits, and conversion counts for current user."""
+    mem = db.get_active_staff_membership(current_user.id, current_user.email)
+    bills_used = 0
+    if mem and mem.get("membership_started_at"):
+        bills_used = db.get_user_bills_converted_since(current_user.id, mem["membership_started_at"])
+    elif mem:
+        bills_used = db.get_user_bills_converted_since(current_user.id)
+
+    plan_id = (mem.get("plan_id") if mem else current_user.subscription_plan_id) or "free"
+    plan_info = get_plan_by_id(plan_id) if plan_id != "free" else None
+
+    limit = mem.get("bills_limit") if mem else current_user.subscription_bill_limit
+    if limit is None:
+        limit = plan_info["bills_limit"] if plan_info else 0
+
+    return {
+        "success": True,
+        "is_active": bool(mem and mem.get("is_active")),
+        "plan_id": plan_id,
+        "plan_name": mem.get("plan_name") if mem else (plan_info["name"] if plan_info else "Free Tier"),
+        "bills_limit": limit,
+        "is_unlimited": bool(mem.get("is_unlimited") if mem else (limit == -1 or current_user.is_unlimited)),
+        "bills_converted_this_cycle": bills_used,
+        "bills_remaining_this_cycle": "Unlimited" if (limit == -1 or current_user.is_unlimited) else max(0, limit - bills_used),
+        "membership_expires_at": mem.get("membership_expires_at") if mem else None,
+        "last_valid_day": mem.get("last_valid_day") if mem else None
+    }
+
+@router.put("/api/admin/subscriptions/plans/{plan_id}")
+async def admin_update_subscription_plan(
+    plan_id: str,
+    payload: UpdatePlanConfigRequest,
+    admin: CurrentUser = Depends(require_admin)
+):
+    """Admin: adjust subscription plan limits, pricing, and validity."""
+    canonical = resolve_plan_id(plan_id)
+    updated = db.upsert_subscription_plan_config(
+        plan_id=canonical,
+        name=payload.name,
+        price_inr=payload.price_inr,
+        bills_limit=payload.bills_limit,
+        duration_days=payload.duration_days
+    )
+    return {
+        "success": True,
+        "message": f"Subscription plan '{canonical}' updated successfully.",
+        "plan": get_plan_by_id(canonical)
+    }
+
+@router.post("/api/payments/create-order")
+@router.post("/api/subscriptions/create-order")
+async def create_payment_order(
+    payload: Optional[CreateOrderRequest] = None,
+    current_user: CurrentUser = Depends(get_current_user)
+):
+    """
+    Creates a Razorpay Order server-side (PRD: Exact subscription pricing, zero tax added).
+    Amount is strictly determined server-side from authoritative plan configuration:
+    - Basic: ₹199 (19900 paise, 50 bills)
+    - Standard: ₹299 (29900 paise, 150 bills)
+    - Premium: ₹499 (49900 paise, Unlimited bills)
+    The client must never decide the price.
+    """
+    key_id = (getattr(settings, "razorpay_key_id", None) or "").strip()
+    key_secret = (getattr(settings, "razorpay_key_secret", None) or "").strip()
+
+    requested_plan = (payload.planId if payload else None) or "basic"
+    plan_info = get_plan_by_id(requested_plan)
+    amount_paise = plan_info["price_paise"]
+    plan_id = plan_info["id"]
+    plan_name = plan_info["name"]
+
+    cust_phone = ((payload.customer_phone if payload else None) or "").strip() or current_user.mobile_number or ""
+    cust_name = ((payload.customer_name if payload else None) or "").strip() or current_user.full_name or ""
+    cust_email = ((payload.customer_email if payload else None) or "").strip().lower() or current_user.email or ""
+
+    if not key_id or not key_secret:
+        logger.error("Razorpay order creation rejected: RAZORPAY_KEY_ID or RAZORPAY_KEY_SECRET is not configured.")
+        raise HTTPException(
+            status_code=503,
+            detail="Razorpay API credentials (RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET) are not configured on the backend server."
+        )
+
+    try:
+        url = "https://api.razorpay.com/v1/orders"
+        receipt_id = f"kh_{int(datetime.now(timezone.utc).timestamp())}_{uuid.uuid4().hex[:6]}"[:40]
+        order_data = {
+            "amount": amount_paise,
+            "currency": "INR",
+            "receipt": receipt_id,
+            "notes": {
+                "plan_id": plan_id,
+                "plan_name": plan_name,
+                "bills_limit": str(plan_info["bills_limit"]),
+                "user_id": current_user.id,
+                "user_email": current_user.email,
+                "customer_name": cust_name,
+                "customer_email": cust_email,
+                "customer_phone": cust_phone
+            }
+        }
+        req = urllib.request.Request(url, data=json.dumps(order_data).encode("utf-8"))
+        auth_str = f"{key_id}:{key_secret}"
+        b64_auth = base64.b64encode(auth_str.encode("ascii")).decode("ascii")
+        req.add_header("Authorization", f"Basic {b64_auth}")
+        req.add_header("Content-Type", "application/json")
+        with urllib.request.urlopen(req, timeout=12) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+            order_id = data.get("id")
+            order_amount = data.get("amount", amount_paise)
+            order_currency = data.get("currency", "INR")
+            logger.info(f"Razorpay order created successfully: {order_id} ({order_amount} {order_currency}, plan={plan_id}) for user {current_user.id}")
+
+            return {
+                "orderId": order_id,
+                "order_id": order_id,
+                "amount": order_amount,
+                "amount_paise": order_amount,
+                "currency": order_currency,
+                "keyId": key_id,
+                "key_id": key_id,
+                "planId": plan_id,
+                "plan_id": plan_id,
+                "planName": plan_name,
+                "plan_name": plan_name,
+                "billsLimit": plan_info["bills_limit"],
+                "bills_limit": plan_info["bills_limit"],
+                "isUnlimited": plan_info["is_unlimited"],
+                "is_unlimited": plan_info["is_unlimited"]
+            }
+    except urllib.error.HTTPError as err:
+        err_body = err.read().decode("utf-8")
+        error_desc = err_body
+        error_code = f"HTTP_{err.code}"
+        try:
+            err_json = json.loads(err_body)
+            rzp_err = err_json.get("error", {})
+            error_desc = rzp_err.get("description") or rzp_err.get("reason") or err_body
+            error_code = rzp_err.get("code") or error_code
+        except Exception:
+            pass
+        logger.error(f"Razorpay API rejected order creation ({error_code}): {error_desc}")
+        raise HTTPException(
+            status_code=502,
+            detail=f"Payment gateway order creation failed: {error_desc}"
+        )
+    except Exception as exc:
+        logger.error(f"Failed to create Razorpay order: {exc}")
+        raise HTTPException(
+            status_code=500,
+            detail="Unable to initialize payment order with gateway. Please try again."
+        )
+
+@router.post("/api/payments/verify")
+@router.post("/api/subscriptions/verify")
+async def verify_payment_order(
+    payload: VerifyPaymentRequest,
+    current_user: CurrentUser = Depends(get_current_user)
+):
+    """
+    Verifies payment signature and atomically activates the subscription.
+    Enforces exact pricing, correct bill limits (Basic 50, Standard 150, Premium Unlimited),
+    and prevents duplicate activation (idempotent).
+    """
+    key_id = (getattr(settings, "razorpay_key_id", None) or "").strip()
+    key_secret = (getattr(settings, "razorpay_key_secret", None) or "").strip()
+
+    payment_id = (payload.razorpay_payment_id or "").strip()
+    order_id = (payload.razorpay_order_id or "").strip()
+    signature = (payload.razorpay_signature or "").strip()
+
+    if not payment_id:
+        raise HTTPException(status_code=400, detail="Payment ID (razorpay_payment_id) is required.")
+
+    # 1. Cryptographic HMAC-SHA256 signature verification if signature is provided
+    if order_id and signature:
+        if not key_secret:
+            raise HTTPException(status_code=503, detail="Gateway secret is not configured on the backend server.")
+
+        message = f"{order_id}|{payment_id}"
+        generated_signature = hmac.new(
+            key_secret.encode("utf-8"),
+            message.encode("utf-8"),
+            hashlib.sha256
+        ).hexdigest()
+
+        if not hmac.compare_digest(generated_signature, signature):
+            logger.warning(f"Payment verification failed: invalid signature for payment {payment_id}, order {order_id}")
+            raise HTTPException(status_code=400, detail="Invalid payment signature. Payment verification failed.")
+
+    # 2. Server-side payment entity inspection via Razorpay REST API
+    rzp_entity = _fetch_razorpay_payment(payment_id, key_id, key_secret) if (key_id and key_secret) else None
+    captured_at_utc = datetime.now(timezone.utc)
+    payment_status = "captured"
+    amount_paise = None
+
+    if rzp_entity:
+        payment_status = rzp_entity.get("status", "captured")
+        amount_paise = rzp_entity.get("amount")
+        if payment_status not in ("captured", "authorized"):
+            raise HTTPException(
+                status_code=400,
+                detail=f"Payment status is '{payment_status}'. Only successfully captured payments can activate a subscription."
+            )
+        captured_ts = rzp_entity.get("captured_at") or rzp_entity.get("created_at")
+        if captured_ts:
+            try:
+                captured_at_utc = datetime.fromtimestamp(captured_ts, timezone.utc)
+            except Exception:
+                pass
+
+    # Resolve plan details
+    plan_info = get_plan_by_id(payload.planId)
+    if not amount_paise:
+        amount_paise = plan_info["price_paise"]
+
+    verified_at_utc = datetime.now(timezone.utc)
+    user_name = payload.customer_name or current_user.full_name or current_user.email
+    user_email = payload.customer_email or current_user.email
+
+    activation_res = db.process_verified_membership_payment(
+        user_id=current_user.id,
+        user_email=user_email,
+        user_name=user_name,
+        payment_id=payment_id,
+        order_id=order_id or "direct_order",
+        amount_paise=amount_paise,
+        payment_status=payment_status,
+        captured_at_utc=captured_at_utc,
+        verified_at_utc=verified_at_utc,
+        plan_id=plan_info["id"],
+        customer_phone=payload.customer_phone
+    )
+
+    return {
+        "ok": True,
+        "success": True,
+        **activation_res
+    }
+

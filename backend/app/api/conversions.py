@@ -4,7 +4,7 @@ import re
 from datetime import datetime, date
 from decimal import Decimal
 from typing import List, Optional, Dict, Any
-from fastapi import APIRouter, UploadFile, File, Form, Depends, HTTPException, status
+from fastapi import APIRouter, Request, UploadFile, File, Form, Depends, HTTPException, status
 from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel
 
@@ -232,15 +232,26 @@ class ConversionJobSummary(BaseModel):
     transactions: List[TransactionItem] = []
 
 @router.options("/upload")
-async def options_upload_statement():
-    """Handle preflight OPTIONS request explicitly for browser CORS compliance."""
+async def options_upload_statement(request: Request):
+    """Handle preflight OPTIONS request dynamically for browser CORS compliance."""
+    origin = request.headers.get("origin")
+    allowed = origin if (
+        origin and (
+            "netlify.app" in origin
+            or "localhost" in origin
+            or "127.0.0.1" in origin
+            or origin in ("https://kangrahubtallyxml.netlify.app", "https://deploy-preview-1--kangrahubtallyxml.netlify.app")
+        )
+    ) else "https://kangrahubtallyxml.netlify.app"
+    req_headers = request.headers.get("access-control-request-headers", "Authorization, Content-Type, Accept, Origin, X-Requested-With, X-Total-Count")
     return Response(
         status_code=200,
         headers={
-            "Access-Control-Allow-Origin": "https://kangrahubtallyxml.netlify.app",
-            "Access-Control-Allow-Methods": "POST, OPTIONS",
-            "Access-Control-Allow-Headers": "*",
+            "Access-Control-Allow-Origin": allowed,
+            "Access-Control-Allow-Methods": "POST, OPTIONS, GET",
+            "Access-Control-Allow-Headers": req_headers,
             "Access-Control-Allow-Credentials": "true",
+            "Access-Control-Max-Age": "86400",
         }
     )
 
