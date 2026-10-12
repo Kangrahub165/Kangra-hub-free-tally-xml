@@ -9,6 +9,7 @@ from pydantic import BaseModel
 
 from app.core.config import settings
 from app.core.security import require_admin, CurrentUser
+from app.core import db
 
 logger = logging.getLogger("kangra_hub.admin")
 
@@ -673,6 +674,98 @@ async def update_user_quota(
             "effective_daily_limit": effective,
             "global_daily_limit": settings.free_daily_page_limit
         }
+    }
+
+class GrantQuotaExceptionRequest(BaseModel):
+    user_id: str
+    scope: str = "BOTH"  # "PDF_PAGE", "IMAGE", "BOTH"
+    limit_type: str = "DAILY_LIMIT"  # "UNLIMITED", "DAILY_LIMIT"
+    limit_value: Optional[int] = None
+    starts_at: Optional[str] = None  # YYYY-MM-DD
+    ends_at: Optional[str] = None  # YYYY-MM-DD
+    reason: str
+
+@router.post("/exceptions")
+@router.post("/quota-exceptions")
+async def grant_quota_exception_endpoint(
+    payload: GrantQuotaExceptionRequest,
+    admin: CurrentUser = Depends(require_admin)
+):
+    """
+    Grants an approved quota exception (PRD FR-A-4, FR-A-5).
+    Logs the action in quota_audit_log.
+    """
+    scope = payload.scope.upper().strip()
+    if scope not in ("PDF_PAGE", "IMAGE", "BOTH"):
+        raise HTTPException(status_code=400, detail="Invalid scope. Must be 'PDF_PAGE', 'IMAGE', or 'BOTH'.")
+    limit_type = payload.limit_type.upper().strip()
+    if limit_type not in ("UNLIMITED", "DAILY_LIMIT"):
+        raise HTTPException(status_code=400, detail="Invalid limit_type. Must be 'UNLIMITED' or 'DAILY_LIMIT'.")
+    if limit_type == "DAILY_LIMIT" and (payload.limit_value is None or payload.limit_value < 1):
+        raise HTTPException(status_code=400, detail="limit_value must be at least 1 for DAILY_LIMIT exceptions.")
+    if not payload.reason or not payload.reason.strip():
+        raise HTTPException(status_code=400, detail="A valid business reason is required for quota exceptions.")
+
+    starts_at = payload.starts_at or db.get_ist_today()
+    granted_by = getattr(admin, "email", None) or str(admin.id)
+
+    exc = db.grant_quota_exception(
+        user_id=payload.user_id.strip(),
+        scope=scope,
+        limit_type=limit_type,
+        limit_value=payload.limit_value if limit_type == "DAILY_LIMIT" else None,
+        starts_at=starts_at,
+        ends_at=payload.ends_at,
+        reason=payload.reason.strip(),
+        granted_by=granted_by
+    )
+    return {
+        "success": True,
+        "message": f"Quota exception granted for user {payload.user_id}.",
+        "exception": exc
+    }
+
+@router.delete("/exceptions/{exception_id}")
+@router.delete("/quota-exceptions/{exception_id}")
+async def revoke_quota_exception_endpoint(
+    exception_id: str,
+    admin: CurrentUser = Depends(require_admin)
+):
+    """
+    Revokes an active approved quota exception with audit log (PRD FR-A-8).
+    """
+    revoked_by = getattr(admin, "email", None) or str(admin.id)
+    success = db.revoke_quota_exception(exception_id, revoked_by=revoked_by)
+    if not success:
+        raise HTTPException(status_code=404, detail="Active quota exception not found or already revoked.")
+    return {
+        "success": True,
+        "message": f"Quota exception {exception_id} has been revoked."
+    }
+
+@router.get("/exceptions")
+@router.get("/quota-exceptions")
+async def list_quota_exceptions_endpoint(
+    user_id: Optional[str] = None,
+    admin: CurrentUser = Depends(require_admin)
+):
+    """Lists quota exceptions, optionally filtered by user_id."""
+    excs = db.list_quota_exceptions(user_id=user_id)
+    return {
+        "success": True,
+        "exceptions": excs
+    }
+
+@router.get("/quota-audit-logs")
+async def list_quota_audit_logs_endpoint(
+    limit: int = 100,
+    admin: CurrentUser = Depends(require_admin)
+):
+    """Lists recent quota audit log entries."""
+    logs = db.get_quota_audit_logs(limit=limit)
+    return {
+        "success": True,
+        "logs": logs
     }
 
 @router.post("/users/{user_id}/resend-verification")

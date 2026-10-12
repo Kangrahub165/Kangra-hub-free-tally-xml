@@ -44,6 +44,8 @@ Thumbs.db
 *.swo
 run_*.py
 test_*.py
+!backend/tests/**
+backend/tests/**/__pycache__/
 # Local database
 backend/data/
 

@@ -164,9 +164,15 @@ def get_user_usage_data(user: CurrentUser) -> UserUsageResponse:
                     jobs_today_pages += p_count
 
     # Check persistent SQLite daily usage
-    db_recorded_pages = db.get_daily_usage(user.id, today)
+    db_recorded_pages = max(
+        db.get_daily_usage(user.id, today),
+        db.get_daily_quota_used(user.id, today, "PDF_PAGE")
+    )
     if db_recorded_pages == 0 and getattr(user, "email", None):
-        db_recorded_pages = db.get_daily_usage(user.email, today)
+        db_recorded_pages = max(
+            db.get_daily_usage(user.email, today),
+            db.get_daily_quota_used(user.email, today, "PDF_PAGE")
+        )
 
     mem_recorded_pages = _IN_MEMORY_DAILY_USAGE.get(key, 0)
     recorded_pages = max(db_recorded_pages, mem_recorded_pages)

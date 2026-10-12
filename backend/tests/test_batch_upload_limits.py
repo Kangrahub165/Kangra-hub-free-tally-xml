@@ -8,11 +8,25 @@ from app.gemini.extractor import GeminiExtractor
 from app.transactions.model import CanonicalStatement, TransactionItem
 from decimal import Decimal
 from datetime import date
+from app.core import db
 
 client = TestClient(app)
 
 USER_HEADERS = {"Authorization": "Bearer mock-user-token"}
 ADMIN_HEADERS = {"Authorization": "Bearer mock-admin-token"}
+
+@pytest.fixture(autouse=True)
+def clean_quota_usage():
+    with db._LOCK:
+        conn = db._get_connection()
+        try:
+            conn.cursor().execute("DELETE FROM daily_quota_usage")
+            conn.cursor().execute("DELETE FROM quota_reservations")
+            conn.cursor().execute("DELETE FROM quota_exceptions")
+            conn.commit()
+        finally:
+            conn.close()
+    yield
 
 def make_dummy_jpeg_bytes() -> bytes:
     """Generate minimal valid JPEG bytes with resolution >= 100x100."""
@@ -148,7 +162,7 @@ def test_normal_user_batch_within_limit_10_images():
                 credit=Decimal("0.00"),
                 running_balance=Decimal("2000.00"),
                 voucher_type="Payment",
-                source_page=10
+                source_page=5
             )
         ]
     )

@@ -229,6 +229,81 @@ def init_db():
             );
             """)
 
+            # 12. PRD Oct 12, 2026: Daily Quota Usage Table (Independent counters: PDF_PAGE & IMAGE)
+            cursor.execute("""
+            CREATE TABLE IF NOT EXISTS daily_quota_usage (
+                id TEXT PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                quota_date TEXT NOT NULL,
+                type TEXT NOT NULL,
+                used INTEGER DEFAULT 0,
+                updated_at TEXT,
+                UNIQUE(user_id, quota_date, type)
+            );
+            """)
+
+            # 13. PRD Oct 12, 2026: Quota Reservations Table
+            cursor.execute("""
+            CREATE TABLE IF NOT EXISTS quota_reservations (
+                reservation_id TEXT PRIMARY KEY,
+                job_id TEXT NOT NULL,
+                user_id TEXT NOT NULL,
+                quota_date TEXT NOT NULL,
+                type TEXT NOT NULL,
+                reserved_count INTEGER DEFAULT 0,
+                consumed_count INTEGER DEFAULT 0,
+                released_count INTEGER DEFAULT 0,
+                status TEXT DEFAULT 'RESERVED',
+                created_at TEXT NOT NULL
+            );
+            """)
+
+            # 14. PRD Oct 12, 2026: Job Pages Tracking Table
+            cursor.execute("""
+            CREATE TABLE IF NOT EXISTS job_pages (
+                id TEXT PRIMARY KEY,
+                job_id TEXT NOT NULL,
+                file_id TEXT,
+                page_number INTEGER NOT NULL,
+                status TEXT NOT NULL,
+                error_reason TEXT,
+                transaction_count INTEGER DEFAULT 0,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            """)
+
+            # 15. PRD Oct 12, 2026: Quota Exceptions Table
+            cursor.execute("""
+            CREATE TABLE IF NOT EXISTS quota_exceptions (
+                id TEXT PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                scope TEXT NOT NULL,
+                limit_type TEXT NOT NULL,
+                limit_value INTEGER,
+                starts_at TEXT NOT NULL,
+                ends_at TEXT,
+                reason TEXT,
+                granted_by TEXT NOT NULL,
+                granted_at TEXT NOT NULL,
+                revoked_at TEXT,
+                revoked_by TEXT
+            );
+            """)
+
+            # 16. PRD Oct 12, 2026: Quota Audit Log Table
+            cursor.execute("""
+            CREATE TABLE IF NOT EXISTS quota_audit_log (
+                id TEXT PRIMARY KEY,
+                actor TEXT NOT NULL,
+                action TEXT NOT NULL,
+                target_user TEXT NOT NULL,
+                old_value TEXT,
+                new_value TEXT,
+                created_at TEXT NOT NULL
+            );
+            """)
+
             # Schema migrations for users table (subscription columns)
             try:
                 cursor.execute("ALTER TABLE users ADD COLUMN subscription_plan_id TEXT;")
@@ -263,6 +338,11 @@ def init_db():
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_audit_log_timestamp ON page_credit_audit_log(timestamp);")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_mem_payments_user ON membership_payments(user_id);")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_staff_memberships_user ON staff_memberships(user_id);")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_daily_quota_usage_lookup ON daily_quota_usage(user_id, quota_date, type);")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_quota_reservations_job ON quota_reservations(job_id);")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_job_pages_job_id ON job_pages(job_id);")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_quota_exceptions_user ON quota_exceptions(user_id);")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_quota_audit_log_target ON quota_audit_log(target_user);")
 
             conn.commit()
 
@@ -1505,6 +1585,422 @@ def get_user_bills_converted_since(user_id: str, start_date_iso: Optional[str] =
                 """, (user_id, user_id))
             row = cursor.fetchone()
             return int(row["cnt"]) if row and row["cnt"] is not None else 0
+        finally:
+            conn.close()
+
+def get_ist_now() -> datetime:
+    tz = pytz.timezone("Asia/Kolkata")
+    return datetime.now(tz)
+
+def get_ist_today() -> str:
+    return get_ist_now().strftime("%Y-%m-%d")
+
+def get_daily_quota_used(user_id: str, quota_date: str, quota_type: str) -> int:
+    """Returns today's used count for user_id on quota_date (IST) for quota_type (PDF_PAGE or IMAGE)."""
+    if not user_id:
+        return 0
+    with _LOCK:
+        conn = _get_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT used FROM daily_quota_usage
+                WHERE (user_id = ? OR user_id = LOWER(?)) AND quota_date = ? AND type = ?
+            """, (user_id, user_id, quota_date, quota_type))
+            row = cursor.fetchone()
+            if row is not None and row["used"] is not None:
+                return int(row["used"])
+
+            # Fallback for PDF_PAGE to legacy daily_usage table if daily_quota_usage has no entry
+            if quota_type == "PDF_PAGE":
+                cursor.execute("""
+                    SELECT pages_used FROM daily_usage
+                    WHERE user_id = ? AND date_str = ?
+                """, (user_id, quota_date))
+                leg_row = cursor.fetchone()
+                if leg_row is not None and leg_row["pages_used"] is not None:
+                    return int(leg_row["pages_used"])
+
+            return 0
+        finally:
+            conn.close()
+
+def reserve_quota_atomic(
+    job_id: str,
+    user_id: str,
+    quota_date: str,
+    quota_type: str,
+    requested_count: int,
+    daily_limit: int,
+    is_unlimited: bool = False
+) -> Dict[str, Any]:
+    """
+    Atomically checks and reserves quota for a job before any OCR/AI work starts (PRD FR-D-2 & FR-D-3).
+    Ensures parallel requests cannot both succeed past the remaining limit.
+    """
+    if requested_count <= 0:
+        return {
+            "reservation_id": None,
+            "accepted": 0,
+            "unprocessed": 0,
+            "used_before": 0,
+            "remaining_before": daily_limit,
+            "limit": daily_limit
+        }
+
+    now_iso = get_ist_now().isoformat()
+    with _LOCK:
+        conn = _get_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute("BEGIN IMMEDIATE")
+
+            # Read current usage
+            cursor.execute("""
+                SELECT used FROM daily_quota_usage
+                WHERE (user_id = ? OR user_id = LOWER(?)) AND quota_date = ? AND type = ?
+            """, (user_id, user_id, quota_date, quota_type))
+            row = cursor.fetchone()
+            current_used = int(row["used"]) if row and row["used"] is not None else 0
+
+            # Fallback to legacy daily_usage if not in daily_quota_usage yet
+            if current_used == 0 and quota_type == "PDF_PAGE":
+                cursor.execute("""
+                    SELECT pages_used FROM daily_usage
+                    WHERE user_id = ? AND date_str = ?
+                """, (user_id, quota_date))
+                leg = cursor.fetchone()
+                if leg and leg["pages_used"] is not None:
+                    current_used = int(leg["pages_used"])
+
+            if is_unlimited:
+                accepted = requested_count
+                remaining_before = 999999
+            else:
+                remaining_before = max(0, daily_limit - current_used)
+                accepted = min(requested_count, remaining_before)
+
+            unprocessed = max(0, requested_count - accepted)
+            res_id = f"res-{uuid.uuid4().hex[:12]}"
+
+            if accepted > 0 and not is_unlimited:
+                rec_id = f"dqu-{uuid.uuid4().hex[:12]}"
+                cursor.execute("""
+                    INSERT INTO daily_quota_usage (id, user_id, quota_date, type, used, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(user_id, quota_date, type) DO UPDATE SET
+                        used = used + excluded.used,
+                        updated_at = excluded.updated_at
+                """, (rec_id, user_id, quota_date, quota_type, accepted, now_iso))
+
+                # Also keep legacy daily_usage synced for backward compatibility
+                if quota_type == "PDF_PAGE":
+                    cursor.execute("""
+                        INSERT INTO daily_usage (id, user_id, date_str, pages_used, updated_at)
+                        VALUES (?, ?, ?, ?, ?)
+                        ON CONFLICT(user_id, date_str) DO UPDATE SET
+                            pages_used = pages_used + excluded.pages_used,
+                            updated_at = excluded.updated_at
+                    """, (f"du-{uuid.uuid4().hex[:12]}", user_id, quota_date, accepted, now_iso))
+
+            # Record reservation
+            cursor.execute("""
+                INSERT INTO quota_reservations (
+                    reservation_id, job_id, user_id, quota_date, type,
+                    reserved_count, consumed_count, released_count, status, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, 0, 0, 'RESERVED', ?)
+            """, (res_id, job_id, user_id, quota_date, quota_type, accepted, now_iso))
+
+            conn.commit()
+            return {
+                "reservation_id": res_id,
+                "reserved_count": accepted,
+                "accepted": accepted,
+                "unprocessed_count": unprocessed,
+                "unprocessed": unprocessed,
+                "used_before": current_used,
+                "remaining_before": remaining_before,
+                "limit": daily_limit if not is_unlimited else 999999
+            }
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
+
+def reconcile_quota_reservation(
+    reservation_id: Optional[str],
+    consumed_count: int,
+    failed_system_count: int
+) -> None:
+    """
+    Reconciles reservation when job completes or fails (PRD FR-P-2 & FR-D-5).
+    Releases back reservation for pages that failed due to system error.
+    Idempotent: running twice gives same result.
+    """
+    if not reservation_id:
+        return
+    now_iso = get_ist_now().isoformat()
+    with _LOCK:
+        conn = _get_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute("BEGIN IMMEDIATE")
+
+            cursor.execute("""
+                SELECT user_id, quota_date, type, reserved_count, status
+                FROM quota_reservations WHERE reservation_id = ?
+            """, (reservation_id,))
+            res = cursor.fetchone()
+            if not res or res["status"] in ("CONSUMED", "RELEASED"):
+                conn.commit()
+                return
+
+            user_id = res["user_id"]
+            quota_date = res["quota_date"]
+            q_type = res["type"]
+            reserved_count = res["reserved_count"]
+
+            to_release = min(reserved_count, max(0, failed_system_count))
+            actual_consumed = max(0, min(reserved_count - to_release, consumed_count))
+
+            cursor.execute("""
+                UPDATE quota_reservations SET
+                    consumed_count = ?,
+                    released_count = ?,
+                    status = 'CONSUMED'
+                WHERE reservation_id = ?
+            """, (actual_consumed, to_release, reservation_id))
+
+            if to_release > 0:
+                cursor.execute("""
+                    UPDATE daily_quota_usage SET
+                        used = MAX(0, used - ?),
+                        updated_at = ?
+                    WHERE user_id = ? AND quota_date = ? AND type = ?
+                """, (to_release, now_iso, user_id, quota_date, q_type))
+
+                if q_type == "PDF_PAGE":
+                    cursor.execute("""
+                        UPDATE daily_usage SET
+                            pages_used = MAX(0, pages_used - ?),
+                            updated_at = ?
+                        WHERE user_id = ? AND date_str = ?
+                    """, (to_release, now_iso, user_id, quota_date))
+
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
+
+def save_job_page(
+    job_id: str,
+    page_number: int,
+    status: str,
+    file_id: Optional[str] = None,
+    error_reason: Optional[str] = None,
+    transaction_count: int = 0
+) -> str:
+    """Saves or updates a job page tracking row (PRD Section 6, 7)."""
+    now_iso = get_ist_now().isoformat()
+    rec_id = f"jp-{uuid.uuid4().hex[:12]}"
+    with _LOCK:
+        conn = _get_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT id FROM job_pages WHERE job_id = ? AND page_number = ?
+            """, (job_id, page_number))
+            existing = cursor.fetchone()
+            if existing:
+                cursor.execute("""
+                    UPDATE job_pages SET
+                        status = ?,
+                        error_reason = ?,
+                        transaction_count = ?,
+                        updated_at = ?
+                    WHERE job_id = ? AND page_number = ?
+                """, (status, error_reason, transaction_count, now_iso, job_id, page_number))
+                conn.commit()
+                return existing["id"]
+            else:
+                cursor.execute("""
+                    INSERT INTO job_pages (
+                        id, job_id, file_id, page_number, status,
+                        error_reason, transaction_count, created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (rec_id, job_id, file_id, page_number, status, error_reason, transaction_count, now_iso, now_iso))
+                conn.commit()
+                return rec_id
+        finally:
+            conn.close()
+
+def get_job_pages(job_id: str) -> List[Dict[str, Any]]:
+    """Retrieves all tracked pages for a job in sequential order (PRD FR-O-11)."""
+    with _LOCK:
+        conn = _get_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT id, job_id, file_id, page_number, status, error_reason, transaction_count, created_at, updated_at
+                FROM job_pages WHERE job_id = ? ORDER BY page_number ASC
+            """, (job_id,))
+            rows = cursor.fetchall()
+            return [dict(r) for r in rows]
+        finally:
+            conn.close()
+
+def get_active_quota_exception(user_id: str, quota_date: str) -> Optional[Dict[str, Any]]:
+    """
+    Looks up active approved quota exception for a user (PRD FR-A-6).
+    Fails safely: returns None if table cannot be read or no active record.
+    """
+    if not user_id:
+        return None
+    try:
+        with _LOCK:
+            conn = _get_connection()
+            try:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    SELECT id, user_id, scope, limit_type, limit_value, starts_at, ends_at, reason, granted_by, granted_at
+                    FROM quota_exceptions
+                    WHERE (user_id = ? OR user_id = LOWER(?))
+                      AND revoked_at IS NULL
+                      AND starts_at <= ?
+                      AND (ends_at IS NULL OR ends_at >= ?)
+                    ORDER BY granted_at DESC LIMIT 1
+                """, (user_id, user_id, quota_date, quota_date))
+                row = cursor.fetchone()
+                return dict(row) if row else None
+            finally:
+                conn.close()
+    except Exception as e:
+        logger.warning(f"Error checking quota exception for {user_id}: {e}")
+        return None
+
+def grant_quota_exception(
+    user_id: str,
+    scope: str,
+    limit_type: str,
+    limit_value: Optional[int],
+    starts_at: str,
+    ends_at: Optional[str],
+    reason: str,
+    granted_by: str
+) -> Dict[str, Any]:
+    """Grants an approved exception record with audit log (PRD FR-A-4, FR-A-5, FR-A-7)."""
+    exc_id = f"exc-{uuid.uuid4().hex[:12]}"
+    now_iso = get_ist_now().isoformat()
+    with _LOCK:
+        conn = _get_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute("""
+                INSERT INTO quota_exceptions (
+                    id, user_id, scope, limit_type, limit_value,
+                    starts_at, ends_at, reason, granted_by, granted_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (exc_id, user_id, scope, limit_type, limit_value, starts_at, ends_at, reason, granted_by, now_iso))
+
+            # Audit log
+            audit_id = f"aud-{uuid.uuid4().hex[:12]}"
+            new_val = json.dumps({
+                "scope": scope,
+                "limit_type": limit_type,
+                "limit_value": limit_value,
+                "starts_at": starts_at,
+                "ends_at": ends_at,
+                "reason": reason
+            })
+            cursor.execute("""
+                INSERT INTO quota_audit_log (id, actor, action, target_user, old_value, new_value, created_at)
+                VALUES (?, ?, 'GRANT_EXCEPTION', ?, NULL, ?, ?)
+            """, (audit_id, granted_by, user_id, new_val, now_iso))
+
+            conn.commit()
+            return {
+                "id": exc_id,
+                "user_id": user_id,
+                "scope": scope,
+                "limit_type": limit_type,
+                "limit_value": limit_value,
+                "starts_at": starts_at,
+                "ends_at": ends_at,
+                "reason": reason,
+                "granted_by": granted_by,
+                "granted_at": now_iso
+            }
+        finally:
+            conn.close()
+
+def revoke_quota_exception(exception_id: str, revoked_by: str) -> bool:
+    """Revokes an approved exception with audit log (PRD FR-A-8)."""
+    now_iso = get_ist_now().isoformat()
+    with _LOCK:
+        conn = _get_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT user_id, scope, limit_type, limit_value FROM quota_exceptions
+                WHERE id = ? AND revoked_at IS NULL
+            """, (exception_id,))
+            row = cursor.fetchone()
+            if not row:
+                return False
+
+            user_id = row["user_id"]
+            old_val = json.dumps(dict(row))
+
+            cursor.execute("""
+                UPDATE quota_exceptions SET revoked_at = ?, revoked_by = ? WHERE id = ?
+            """, (now_iso, revoked_by, exception_id))
+
+            audit_id = f"aud-{uuid.uuid4().hex[:12]}"
+            cursor.execute("""
+                INSERT INTO quota_audit_log (id, actor, action, target_user, old_value, new_value, created_at)
+                VALUES (?, ?, 'REVOKE_EXCEPTION', ?, ?, NULL, ?)
+            """, (audit_id, revoked_by, user_id, old_val, now_iso))
+
+            conn.commit()
+            return True
+        finally:
+            conn.close()
+
+def list_quota_exceptions(user_id: Optional[str] = None) -> List[Dict[str, Any]]:
+    """Lists quota exceptions, optionally filtered by user_id."""
+    with _LOCK:
+        conn = _get_connection()
+        try:
+            cursor = conn.cursor()
+            if user_id:
+                cursor.execute("""
+                    SELECT id, user_id, scope, limit_type, limit_value, starts_at, ends_at, reason, granted_by, granted_at, revoked_at, revoked_by
+                    FROM quota_exceptions WHERE (user_id = ? OR user_id = LOWER(?))
+                    ORDER BY granted_at DESC
+                """, (user_id, user_id))
+            else:
+                cursor.execute("""
+                    SELECT id, user_id, scope, limit_type, limit_value, starts_at, ends_at, reason, granted_by, granted_at, revoked_at, revoked_by
+                    FROM quota_exceptions ORDER BY granted_at DESC
+                """)
+            return [dict(r) for r in cursor.fetchall()]
+        finally:
+            conn.close()
+
+def get_quota_audit_logs(limit: int = 100) -> List[Dict[str, Any]]:
+    """Lists recent quota audit log entries."""
+    with _LOCK:
+        conn = _get_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT id, actor, action, target_user, old_value, new_value, created_at
+                FROM quota_audit_log ORDER BY created_at DESC LIMIT ?
+            """, (limit,))
+            return [dict(r) for r in cursor.fetchall()]
         finally:
             conn.close()
 

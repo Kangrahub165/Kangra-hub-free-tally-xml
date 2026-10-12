@@ -72,7 +72,11 @@ import {
   getRecentActiveConversion,
   getMyPaymentRequests,
   PaymentConfig,
-  PaymentRequest
+  PaymentRequest,
+  getDailyQuota,
+  DailyQuotaInfo,
+  getJobPages,
+  JobPageInfo
 } from '@/lib/api';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
@@ -171,6 +175,7 @@ export default function ConvertPage() {
   const [pendingPayments, setPendingPayments] = useState<PaymentRequest[]>([]);
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved'>('idle');
   const [showNewStatementModal, setShowNewStatementModal] = useState(false);
+  const [dailyQuota, setDailyQuota] = useState<DailyQuotaInfo | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -181,6 +186,7 @@ export default function ConvertPage() {
       return;
     }
     getUserUsage().then(setUsage).catch(() => {});
+    getDailyQuota().then(setDailyQuota).catch(() => {});
     getSupportedBanks().then(setSupportedBanks).catch(() => {});
     getPaymentConfig().then(setPaymentConfig).catch(() => {});
     getRecentActiveConversion().then((recent) => {
@@ -319,6 +325,12 @@ export default function ConvertPage() {
   const startConversion = async (pdfPassword?: string) => {
     if (files.length === 0) return;
     setErrorMsg('');
+    // Strict Job Isolation (PRD Item 3): Clear previous job state completely
+    setTransactions([]);
+    setJob(null);
+    setXmlResult(null);
+    setExcelResult(null);
+    setActiveRecentJob(null);
     setCurrentStep(2);
     const isImage = files.some(f => /\.(jpe?g)$/i.test(f.name));
     setProcessingStep(
@@ -381,6 +393,7 @@ export default function ConvertPage() {
       }
 
       getUserUsage().then(setUsage).catch(() => {});
+      getDailyQuota().then(setDailyQuota).catch(() => {});
     } catch (err: any) {
       setCurrentStep(1);
       const isPasswordIssue =
@@ -1063,6 +1076,39 @@ export default function ConvertPage() {
         {/* STAGE 1: UPLOAD ZONE */}
         {currentStep === 1 && (
           <div className="max-w-3xl mx-auto space-y-6">
+
+            {/* Daily Free Quota Bar (PRD Section 4 & 5) */}
+            <Card className="p-4 border-slate-200 bg-white shadow-xs">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div className="flex items-center gap-3">
+                  <div className="w-9 h-9 rounded-xl bg-brand-50 text-brand-600 flex items-center justify-center font-bold">
+                    <Sparkles className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <h4 className="text-xs font-bold text-slate-800 uppercase tracking-wider">
+                      Daily Free Quota
+                    </h4>
+                    <p className="text-[11px] text-slate-500">
+                      Independent counters for PDF and Images. Resets daily at {dailyQuota?.reset_time_ist || '12:00 AM IST'}.
+                    </p>
+                  </div>
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <div className="px-3 py-1.5 rounded-xl bg-slate-100 border border-slate-200 text-xs">
+                    <span className="text-slate-500 font-medium">PDF Pages: </span>
+                    <strong className="text-slate-800">
+                      {dailyQuota?.is_unlimited ? 'Unlimited' : `${dailyQuota?.pdf_pages?.remaining ?? 50} / ${dailyQuota?.pdf_pages?.limit ?? 50} remaining`}
+                    </strong>
+                  </div>
+                  <div className="px-3 py-1.5 rounded-xl bg-slate-100 border border-slate-200 text-xs">
+                    <span className="text-slate-500 font-medium">Images: </span>
+                    <strong className="text-slate-800">
+                      {dailyQuota?.is_unlimited ? 'Unlimited' : `${dailyQuota?.images?.remaining ?? 5} / ${dailyQuota?.images?.limit ?? 5} remaining`}
+                    </strong>
+                  </div>
+                </div>
+              </div>
+            </Card>
             
             {/* Continue Previous Conversion Recovery Card (PRD #34) */}
             {activeRecentJob && (
@@ -1337,6 +1383,42 @@ export default function ConvertPage() {
               </select>
             </Card>
 
+            {/* Pre-upload Quota Warning Banner (PRD Section 4) */}
+            {files.length > 0 && dailyQuota && !dailyQuota.is_unlimited && (
+              (() => {
+                const isImg = files.some(f => /\.(jpe?g)$/i.test(f.name));
+                if (isImg) {
+                  const remImg = dailyQuota.images?.remaining ?? 5;
+                  if (remImg <= 0) {
+                    return (
+                      <div className="p-4 rounded-2xl bg-amber-50 border border-amber-200 text-amber-900 text-xs font-medium space-y-1">
+                        <p className="font-bold text-amber-800">Free Daily Image Limit Exhausted</p>
+                        <p>You have reached your free daily limit for today (5 images). Your limit will reset at 12:00 AM IST.</p>
+                      </div>
+                    );
+                  } else if (files.length > remImg) {
+                    return (
+                      <div className="p-4 rounded-2xl bg-amber-50 border border-amber-200 text-amber-900 text-xs font-medium space-y-1">
+                        <p className="font-bold text-amber-800">Upload Exceeds Remaining Image Quota</p>
+                        <p>Your free daily limit is 5 images. You selected {files.length} images. We will accept the first {remImg} images for processing. The remaining {files.length - remImg} images will not be processed under the free quota.</p>
+                      </div>
+                    );
+                  }
+                } else {
+                  const remPdf = dailyQuota.pdf_pages?.remaining ?? 50;
+                  if (remPdf <= 0) {
+                    return (
+                      <div className="p-4 rounded-2xl bg-amber-50 border border-amber-200 text-amber-900 text-xs font-medium space-y-1">
+                        <p className="font-bold text-amber-800">Free Daily PDF Limit Exhausted</p>
+                        <p>You have reached your free daily limit for today (50 PDF pages). Your limit will reset at 12:00 AM IST.</p>
+                      </div>
+                    );
+                  }
+                }
+                return null;
+              })()
+            )}
+
             {files.length > 0 && (
               <div className="text-center pt-2 flex flex-col sm:flex-row items-center justify-center gap-3">
                 <Button
@@ -1463,6 +1545,36 @@ export default function ConvertPage() {
         {/* STAGES 4 & 5: REVIEW TRANSACTIONS & LEDGER MAPPING */}
         {(currentStep === 4 || currentStep === 5) && job && (
           <div className="space-y-6">
+
+            {/* Post-Upload Outcome Breakdown (PRD Section 4 & 6) */}
+            <Card className="p-4 border-slate-200 bg-slate-50/50 shadow-xs">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="font-bold text-slate-800">Processing Outcome:</span>
+                  <span className="px-2 py-0.5 rounded-md bg-emerald-100 text-emerald-800 font-bold">
+                    Accepted: {job.accepted_pages ?? job.pages_processed ?? 0}
+                  </span>
+                  <span className="px-2 py-0.5 rounded-md bg-blue-100 text-blue-800 font-bold">
+                    Extracted: {job.transaction_count} Txns
+                  </span>
+                  {job.unprocessed_pages && job.unprocessed_pages > 0 ? (
+                    <span className="px-2 py-0.5 rounded-md bg-amber-100 text-amber-800 font-bold">
+                      Not Processed (Quota): {job.unprocessed_pages}
+                    </span>
+                  ) : null}
+                  {job.warning_count && job.warning_count > 0 ? (
+                    <span className="px-2 py-0.5 rounded-md bg-amber-100 text-amber-700 font-medium">
+                      Warnings: {job.warning_count}
+                    </span>
+                  ) : null}
+                </div>
+                {job.quota_message && (
+                  <span className="text-[11px] text-slate-600 font-medium italic">
+                    {job.quota_message}
+                  </span>
+                )}
+              </div>
+            </Card>
             
             {/* Quota Exhausted Banner */}
             {job.status === 'QUOTA_EXHAUSTED' && (

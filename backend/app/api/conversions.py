@@ -345,6 +345,14 @@ class ConversionJobSummary(BaseModel):
     candidates: List[Any] = []
     error_message: Optional[str] = None
     transactions: List[TransactionItem] = []
+    quota_type: Optional[str] = "PDF_PAGE"
+    accepted_pages: Optional[int] = 0
+    unprocessed_pages: Optional[int] = 0
+    processed_pages: Optional[int] = 0
+    failed_pages: Optional[int] = 0
+    warning_pages: Optional[int] = 0
+    quota_message: Optional[str] = None
+    job_pages: List[Dict[str, Any]] = []
 
 @router.options("/upload")
 async def options_upload_statement(request: Request):
@@ -470,42 +478,55 @@ async def upload_statement(
 
     app_logger.info(f"Starting conversion job {job_id} ({file_ext.upper()}, {page_count} pages) for user {current_user.email}, file: {orig_filename}")
 
-    # 2. Check available page limit (Free Daily Quota + Additional Purchased Balance)
-    usage = get_user_usage_data(current_user)
-    is_unlimited = usage.is_unlimited or current_user.has_quota_bypass or current_user.is_admin or current_user.role in ("ADMIN", "SUPER_ADMIN")
+    # 2. Check available page limit (Free Daily Quota: 50 PDF pages, 5 images) & Atomic Pre-reservation (PRD FR-Q-1 to FR-Q-12)
+    today_ist = db.get_ist_today()
+    quota_type = "IMAGE" if is_image else "PDF_PAGE"
+    is_admin = bool(current_user.is_admin or (current_user.role in ("ADMIN", "SUPER_ADMIN")) or current_user.has_quota_bypass)
 
-    # Enforce subscription monthly bill limits (PRD Section 2)
-    sub_limit = usage.subscription_bill_limit
-    if sub_limit is not None and not (current_user.is_admin or current_user.role in ("ADMIN", "SUPER_ADMIN")):
-        if sub_limit == -1 or current_user.is_unlimited:
-            # Premium Plan: genuine unlimited conversions without fixed cap
-            is_unlimited = True
-        else:
-            # Basic (50 bills) & Standard (150 bills) plans: check converted bill count
-            mem = db.get_active_staff_membership(current_user.id, current_user.email)
-            since_time = mem.get("membership_started_at") if mem else None
-            bills_used = db.get_user_bills_converted_since(current_user.id, since_time)
-            if bills_used >= sub_limit:
-                app_logger.warning(f"Subscription bill conversion limit reached for {current_user.email}: {bills_used}/{sub_limit} bills")
-                raise HTTPException(
-                    status_code=status.HTTP_403_FORBIDDEN,
-                    detail=f"Your {usage.subscription_plan_name or 'subscription'} monthly bill conversion limit of {sub_limit} bills has been reached. Please upgrade to Standard or Premium for higher limits."
-                )
-            is_unlimited = True
-    
-    remaining_free = usage.pages_remaining_today if not is_unlimited else 999999
-    additional_bal = get_user_additional_pages(current_user) if not is_unlimited else 0
-    total_available = 999999 if is_unlimited else (remaining_free + additional_bal)
-    
-    pages_to_process = min(page_count, total_available)
-    pages_skipped = max(0, page_count - pages_to_process)
+    # Check active approved exception
+    exc = db.get_active_quota_exception(current_user.id, today_ist)
+    if not exc and getattr(current_user, "email", None):
+        exc = db.get_active_quota_exception(current_user.email, today_ist)
+
+    # Check active subscription
+    mem = None
+    try:
+        mem = db.get_active_staff_membership(current_user.id, getattr(current_user, "email", None))
+    except Exception:
+        pass
+
+    is_unlimited = is_admin or current_user.is_unlimited or (mem and mem.get("is_unlimited", 0) == 1)
+    base_daily_limit = 5 if is_image else 50
+    daily_limit = 999999 if is_unlimited else base_daily_limit
+
+    if exc:
+        scope = (exc.get("scope") or "BOTH").upper()
+        limit_type = (exc.get("limit_type") or "DAILY_LIMIT").upper()
+        limit_val = exc.get("limit_value")
+        if scope in (quota_type, "BOTH"):
+            if limit_type == "UNLIMITED":
+                is_unlimited = True
+                daily_limit = 999999
+            elif limit_type == "DAILY_LIMIT" and limit_val is not None:
+                daily_limit = int(limit_val)
+
+    # Atomic Reservation BEFORE any extraction starts (PRD FR-Q-6)
+    reservation = db.reserve_quota_atomic(
+        job_id=job_id,
+        user_id=current_user.id,
+        quota_date=today_ist,
+        quota_type=quota_type,
+        requested_count=page_count,
+        daily_limit=daily_limit,
+        is_unlimited=is_unlimited
+    )
+
+    reservation_id = reservation["reservation_id"]
+    accepted_pages = reservation["reserved_count"]
+    pages_to_process = accepted_pages
+    pages_skipped = reservation["unprocessed_count"]
     is_partial = (pages_skipped > 0)
     suggested_price = round(float(pages_skipped * getattr(settings, "page_price_inr", 2.0)), 2)
-
-    page_statuses = {
-        str(p): ("PROCESSED" if p <= pages_to_process else "PENDING")
-        for p in range(1, page_count + 1)
-    }
 
     configured_bank_ledger = bank_ledger_name if (bank_ledger_name and bank_ledger_name.strip()) else (
         USER_BANK_CONFIGS.get(current_user.id, {}).get("Bank Account") or "Bank Account"
@@ -515,7 +536,18 @@ async def upload_statement(
     )
 
     if pages_to_process == 0:
-        # User has exhausted quota entirely
+        # User has exhausted quota entirely (PRD FR-Q-9)
+        page_statuses = {
+            str(p): "NOT_PROCESSED_QUOTA"
+            for p in range(1, page_count + 1)
+        }
+        for p in range(1, page_count + 1):
+            db.save_job_page(job_id=job_id, page_number=p, status="NOT_PROCESSED_QUOTA", error_reason="Daily free quota limit reached")
+
+        quota_msg = (
+            f"You have reached your free daily limit for today ({daily_limit} {'images' if is_image else 'PDF pages'}). "
+            "Your limit will reset at 12:00 AM IST."
+        )
         job_record = {
             "id": job_id,
             "user_id": current_user.id,
@@ -553,7 +585,7 @@ async def upload_statement(
             "detected_ifsc": None,
             "runner_up_bank": None,
             "runner_up_confidence": None,
-            "detection_reasons": ["Daily free quota and additional page balance are exhausted."],
+            "detection_reasons": [quota_msg],
             "balance_status": "PENDING_SELECTION",
             "statement_from": None,
             "statement_to": None,
@@ -567,7 +599,15 @@ async def upload_statement(
             "xml_filename": None,
             "bank_ledger_name": configured_bank_ledger,
             "cash_ledger_name": configured_cash_ledger,
-            "transactions": []
+            "transactions": [],
+            "quota_type": quota_type,
+            "accepted_pages": 0,
+            "unprocessed_pages": page_count,
+            "processed_pages": 0,
+            "failed_pages": 0,
+            "warning_pages": 0,
+            "quota_message": quota_msg,
+            "job_pages": db.get_job_pages(job_id)
         }
         job_record["user_email"] = getattr(current_user, "email", "")
         IN_MEMORY_JOBS[job_id] = job_record
@@ -577,18 +617,27 @@ async def upload_statement(
             app_logger.warning(f"Failed to persist conversion {job_id}: {_e}")
         return ConversionJobSummary(**job_record)
 
-    # Deduct quota
-    if is_unlimited:
-        free_quota_used = 0
-        additional_quota_used = 0
+    page_statuses = {
+        str(p): ("PROCESSED" if p <= pages_to_process else "NOT_PROCESSED_QUOTA")
+        for p in range(1, page_count + 1)
+    }
+    for p in range(1, pages_to_process + 1):
+        db.save_job_page(job_id=job_id, page_number=p, status="QUEUED")
+    for p in range(pages_to_process + 1, page_count + 1):
+        db.save_job_page(job_id=job_id, page_number=p, status="NOT_PROCESSED_QUOTA", error_reason="Daily free quota limit reached")
+
+    if is_partial:
+        quota_msg = (
+            f"Your free daily limit is {daily_limit} {'images' if is_image else 'PDF pages'}. "
+            f"This upload has {page_count} {'images' if is_image else 'pages'}. "
+            f"We have accepted the first {pages_to_process} for processing. "
+            f"The remaining {pages_skipped} will not be processed under the free quota."
+        )
     else:
-        free_quota_used = min(pages_to_process, remaining_free)
-        remaining_to_deduct = pages_to_process - free_quota_used
-        additional_quota_used = min(remaining_to_deduct, additional_bal)
-        if free_quota_used > 0:
-            record_user_page_usage(current_user, free_quota_used)
-        if additional_quota_used > 0:
-            deduct_user_additional_pages(current_user.id, additional_quota_used)
+        quota_msg = f"Accepted all {pages_to_process} {'images' if is_image else 'pages'} for processing."
+
+    free_quota_used = pages_to_process
+    additional_quota_used = 0
 
     # 3. Extraction via Google Gemini AI (~99% accuracy) or fallback parser
     statement: Optional[CanonicalStatement] = None
@@ -626,19 +675,29 @@ async def upload_statement(
                 app_logger.warning(f"Gemini image extraction error: {_gem_err}")
 
         if not statement or len(statement.transactions) == 0:
+            for p in range(1, pages_to_process + 1):
+                db.save_job_page(job_id=job_id, page_number=p, status="FAILED_PAGE", error_reason="Unable to extract readable transactions from image")
+            db.reconcile_quota_reservation(reservation_id, consumed_count=pages_to_process, failed_system_count=0)
             raise InvalidPDFException(
                 "Unable to extract readable transactions from the uploaded image(s). "
                 "Please verify that the bank statement photo(s) are clear, focused, and not blurry."
             )
     else:
-        # PDF Statements: Extract text & layout
-        extracted_doc = extract_pdf_data(saved_file_path, password=password, max_pages=pages_to_process, start_page=1)
+        # PDF Statements: Extract text & layout (PRD FR-Q-7: max_pages=pages_to_process)
+        try:
+            extracted_doc = extract_pdf_data(saved_file_path, password=password, max_pages=pages_to_process, start_page=1)
+        except Exception as _pdf_err:
+            app_logger.error(f"Error reading PDF data for job {job_id}: {_pdf_err}")
+            db.reconcile_quota_reservation(reservation_id, consumed_count=0, failed_system_count=pages_to_process)
+            for p in range(1, pages_to_process + 1):
+                db.save_job_page(job_id=job_id, page_number=p, status="FAILED_SYSTEM", error_reason=str(_pdf_err))
+            raise
 
-        # Attempt Gemini high-accuracy extraction first
+        # Attempt Gemini high-accuracy chunked extraction first (PRD FR-O-1 to FR-O-10)
         if GeminiExtractor.is_available() and getattr(settings, "gemini_enabled", True):
             try:
                 page_texts = [p.text for p in extracted_doc.pages]
-                statement = GeminiExtractor.extract_from_pdf_pages(page_texts, file_path=saved_file_path)
+                statement = GeminiExtractor.extract_from_pdf_pages(page_texts, file_path=saved_file_path, chunk_size=2)
                 if statement and len(statement.transactions) > 0:
                     extraction_engine = "gemini"
                     detected_bank_name = statement.bank or "Bank Account"
@@ -884,6 +943,34 @@ async def upload_statement(
         "transactions": statement.transactions
     }
     job_record["user_email"] = getattr(current_user, "email", "")
+
+    # Update job_pages with exact outcome per page (PRD FR-O-11)
+    page_tx_counts = {}
+    if statement and statement.transactions:
+        for tx in statement.transactions:
+            p_num = tx.source_page or 1
+            page_tx_counts[p_num] = page_tx_counts.get(p_num, 0) + 1
+
+    for p in range(1, pages_to_process + 1):
+        cnt = page_tx_counts.get(p, 0)
+        has_warn = False
+        if statement and statement.transactions:
+            has_warn = any(tx.validation_status == "WARNING" for tx in statement.transactions if (tx.source_page or 1) == p)
+        st = "PROCESSED_WITH_WARNINGS" if has_warn else "PROCESSED"
+        db.save_job_page(job_id=job_id, page_number=p, status=st, transaction_count=cnt)
+
+    # Reconcile quota consumed
+    db.reconcile_quota_reservation(reservation_id, consumed_count=pages_to_process, failed_system_count=0)
+
+    job_record["quota_type"] = quota_type
+    job_record["accepted_pages"] = pages_to_process
+    job_record["unprocessed_pages"] = pages_skipped
+    job_record["processed_pages"] = pages_to_process
+    job_record["failed_pages"] = 0
+    job_record["warning_pages"] = warning_count
+    job_record["quota_message"] = quota_msg
+    job_record["job_pages"] = db.get_job_pages(job_id)
+
     IN_MEMORY_JOBS[job_id] = job_record
     try:
         db.save_conversion(job_record)
@@ -914,6 +1001,27 @@ async def upload_statement(
     )
 
     return ConversionJobSummary(**job_record)
+
+@router.get("/{job_id}/pages")
+async def get_conversion_job_pages(
+    job_id: str,
+    current_user: CurrentUser = Depends(get_current_user)
+):
+    """
+    Retrieves page-by-page lifecycle status and transaction count for a conversion job (PRD FR-O-11).
+    """
+    job = _get_or_restore_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Conversion job not found.")
+    if not _is_authorized_for_job(job, current_user):
+        raise HTTPException(status_code=403, detail="Unauthorized to access this conversion job.")
+
+    pages = db.get_job_pages(job_id)
+    return {
+        "job_id": job_id,
+        "total_pages": len(pages),
+        "pages": pages
+    }
 
 @router.post("/{job_id}/select-bank", response_model=ConversionJobSummary)
 async def select_bank_manually(
@@ -1752,7 +1860,10 @@ async def download_excel_endpoint(
         path=excel_path,
         filename=excel_filename or f"{job_id}.xlsx",
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        headers={"Access-Control-Expose-Headers": "Content-Disposition"}
+        headers={
+            "Access-Control-Expose-Headers": "Content-Disposition",
+            "Cache-Control": "no-store, no-cache, must-revalidate"
+        }
     )
 
 @router.get("/{job_id}/download")
@@ -1811,7 +1922,10 @@ async def download_tally_xml_endpoint(
         path=xml_path,
         filename=xml_filename or f"{job_id}.xml",
         media_type="application/xml",
-        headers={"Access-Control-Expose-Headers": "Content-Disposition"}
+        headers={
+            "Access-Control-Expose-Headers": "Content-Disposition",
+            "Cache-Control": "no-store, no-cache, must-revalidate"
+        }
     )
 
 @router.get("/active/recent", response_model=Optional[ConversionJobSummary])

@@ -171,6 +171,50 @@ export interface ConversionJobSummary {
   override_warning?: string;
   candidates?: any[];
   transactions?: TransactionItem[];
+  quota_type?: string;
+  accepted_pages?: number;
+  unprocessed_pages?: number;
+  processed_pages?: number;
+  failed_pages?: number;
+  warning_pages?: number;
+  quota_message?: string;
+  job_pages?: JobPageInfo[];
+}
+
+export interface QuotaCounter {
+  limit: number | null;
+  used: number;
+  remaining: number | null;
+}
+
+export interface DailyQuotaInfo {
+  pdf_pages: QuotaCounter;
+  images: QuotaCounter;
+  reset_time_ist: string;
+  date_ist: string;
+  is_admin: boolean;
+  is_unlimited: boolean;
+  is_paid: boolean;
+}
+
+export interface JobPageInfo {
+  id: string;
+  job_id: string;
+  file_id?: string;
+  page_number: number;
+  status: string;
+  error_reason?: string;
+  transaction_count: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export async function getDailyQuota(): Promise<DailyQuotaInfo> {
+  return apiFetch<DailyQuotaInfo>('/quota');
+}
+
+export async function getJobPages(jobId: string): Promise<{ job_id: string; total_pages: number; pages: JobPageInfo[] }> {
+  return apiFetch(`/conversions/${encodeURIComponent(jobId)}/pages`);
 }
 
 export interface ImportedGroup {

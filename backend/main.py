@@ -20,6 +20,7 @@ from app.api.ledgers import router as ledgers_router
 from app.api.auth import router as auth_router
 from app.api.appeals import router as appeals_router
 from app.api.payments import router as payments_router
+from app.api.quota import router as quota_router
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -180,6 +181,7 @@ app.include_router(ledgers_router, prefix=settings.api_prefix)
 app.include_router(auth_router, prefix=settings.api_prefix)
 app.include_router(appeals_router, prefix=f"{settings.api_prefix}/appeals")
 app.include_router(payments_router)
+app.include_router(quota_router, prefix=settings.api_prefix)
 
 @app.get("/")
 async def root():

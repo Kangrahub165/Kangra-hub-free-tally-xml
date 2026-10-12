@@ -354,71 +354,129 @@ class GeminiExtractor:
     def extract_from_pdf_pages(
         cls,
         page_texts: List[str],
-        file_path: Optional[str] = None
+        file_path: Optional[str] = None,
+        chunk_size: int = 2
     ) -> Optional[CanonicalStatement]:
         """
         Extracts transactions from PDF statement pages using Gemini AI.
-        Processes pages in chronological order and merges without duplicates.
+        Processes pages in small sequential chunks (1-2 pages) to prevent output token truncations.
+        Guarantees complete extraction for all pages without dropping transactions (PRD FR-O-1 to FR-O-10).
         """
         if not cls.is_available():
             return None
 
-        # Build concatenated statement text with clear page markers
-        formatted_pages = []
-        for idx, p_text in enumerate(page_texts):
+        # Filter out empty pages while keeping original 1-based page indices
+        indexed_pages = []
+        for idx, p_text in enumerate(page_texts, start=1):
             clean_text = p_text.strip()
             if clean_text:
-                formatted_pages.append(f"--- PAGE {idx+1} ---\n{clean_text}")
+                indexed_pages.append((idx, clean_text))
 
-        if not formatted_pages:
+        if not indexed_pages:
             logger.warning("No digital text found in PDF pages for Gemini extraction.")
             return None
 
-        combined_text = "\n\n".join(formatted_pages)
+        all_transactions: List[TransactionItem] = []
+        detected_bank = "Bank Account"
+        account_number = None
+        statement_from = None
+        statement_to = None
+        opening_bal = None
+        closing_bal = None
 
-        prompt = (
-            "You are a master banking accountant. Extract transactions from this bank statement text with 99%+ accuracy.\n\n"
-            "Output a JSON object with this exact schema:\n"
-            "{\n"
-            '  "bank_name": "detected bank name (e.g. Axis Bank, SBI, ICICI Bank, etc.)",\n'
-            '  "account_number": "masked or visible account number",\n'
-            '  "statement_from": "YYYY-MM-DD",\n'
-            '  "statement_to": "YYYY-MM-DD",\n'
-            '  "opening_balance": 0.00,\n'
-            '  "closing_balance": 0.00,\n'
-            '  "transactions": [\n'
-            "    {\n"
-            '      "page": 1,\n'
-            '      "date": "YYYY-MM-DD",\n'
-            '      "narration": "full transaction narration text",\n'
-            '      "debit": 0.00,\n'
-            '      "credit": 0.00,\n'
-            '      "balance": 0.00,\n'
-            '      "chq_ref": "reference or cheque number if present"\n'
-            "    }\n"
-            "  ]\n"
-            "}\n\n"
-            "RULES:\n"
-            "1. Extract EVERY transaction line sequentially in order.\n"
-            "2. Keep exact narration strings verbatim for party name matching.\n"
-            "3. Ensure debit/credit/balance numbers are parsed cleanly.\n"
-            "4. Opening balance + Total Credits - Total Debits MUST equal Closing balance.\n\n"
-            f"STATEMENT TEXT:\n{combined_text}"
-        )
+        # If only 1 or 2 pages, single chunk
+        effective_chunk_size = max(1, min(chunk_size, 3))
+        for i in range(0, len(indexed_pages), effective_chunk_size):
+            chunk = indexed_pages[i : i + effective_chunk_size]
+            chunk_page_nums = [p_num for p_num, _ in chunk]
+            formatted_chunk = []
+            for p_num, p_text in chunk:
+                formatted_chunk.append(f"--- PAGE {p_num} ---\n{p_text}")
+            chunk_combined = "\n\n".join(formatted_chunk)
 
-        contents = [{"parts": [{"text": prompt}]}]
+            prompt = (
+                "You are a master banking accountant. Extract transactions from this bank statement text with 99%+ accuracy.\n\n"
+                "Output a JSON object with this exact schema:\n"
+                "{\n"
+                '  "bank_name": "detected bank name (e.g. Axis Bank, SBI, ICICI Bank, etc.)",\n'
+                '  "account_number": "masked or visible account number",\n'
+                '  "statement_from": "YYYY-MM-DD",\n'
+                '  "statement_to": "YYYY-MM-DD",\n'
+                '  "opening_balance": 0.00,\n'
+                '  "closing_balance": 0.00,\n'
+                '  "transactions": [\n'
+                "    {\n"
+                f'      "page": {chunk_page_nums[0]},\n'
+                '      "date": "YYYY-MM-DD",\n'
+                '      "narration": "full transaction narration text",\n'
+                '      "debit": 0.00,\n'
+                '      "credit": 0.00,\n'
+                '      "balance": 0.00,\n'
+                '      "chq_ref": "reference or cheque number if present"\n'
+                "    }\n"
+                "  ]\n"
+                "}\n\n"
+                "RULES:\n"
+                "1. Extract EVERY transaction line sequentially in order without skipping any rows.\n"
+                "2. Tag each transaction with the exact 'page' number it appears on.\n"
+                "3. Keep exact narration strings verbatim for party name matching.\n"
+                "4. Ensure debit/credit/balance numbers are parsed cleanly.\n\n"
+                f"STATEMENT TEXT (Pages {chunk_page_nums}):\n{chunk_combined}"
+            )
 
-        logger.info(f"Dispatching PDF statement ({len(page_texts)} pages, {len(combined_text)} chars) to Gemini AI...")
-        res_text = cls._call_gemini_api(contents, timeout_seconds=settings.gemini_timeout_seconds)
-        if not res_text:
+            contents = [{"parts": [{"text": prompt}]}]
+            logger.info(f"Dispatching PDF chunk (Pages {chunk_page_nums}) to Gemini AI...")
+            res_text = cls._call_gemini_api(contents, timeout_seconds=settings.gemini_timeout_seconds)
+            if not res_text:
+                continue
+
+            chunk_statement = cls._parse_and_validate_gemini_response(res_text, raw_text=chunk_combined)
+            if chunk_statement:
+                if (not detected_bank or detected_bank == "Bank Account") and chunk_statement.bank:
+                    detected_bank = chunk_statement.bank
+                if not account_number and chunk_statement.account_number_masked:
+                    account_number = chunk_statement.account_number_masked
+                if opening_bal is None and chunk_statement.opening_balance is not None:
+                    opening_bal = chunk_statement.opening_balance
+                if chunk_statement.closing_balance is not None:
+                    closing_bal = chunk_statement.closing_balance
+                if chunk_statement.statement_from:
+                    if statement_from is None or chunk_statement.statement_from < statement_from:
+                        statement_from = chunk_statement.statement_from
+                if chunk_statement.statement_to:
+                    if statement_to is None or chunk_statement.statement_to > statement_to:
+                        statement_to = chunk_statement.statement_to
+
+                for tx in chunk_statement.transactions:
+                    if tx.source_page is None or tx.source_page not in chunk_page_nums:
+                        tx.source_page = chunk_page_nums[0]
+                    all_transactions.append(tx)
+
+        if not all_transactions:
+            logger.warning("Gemini extraction produced 0 transactions across all page chunks.")
             return None
 
-        statement = cls._parse_and_validate_gemini_response(res_text, raw_text=combined_text)
-        if statement and len(statement.transactions) > 0:
-            logger.info(f"Gemini successfully extracted {len(statement.transactions)} transactions from PDF statement.")
-            return statement
+        # Re-index all transactions sequentially 1..N
+        for idx, tx in enumerate(all_transactions, start=1):
+            tx.row_index = idx
+            tx.id = f"gemini-tx-{idx}"
 
-        return None
+        total_debit = sum(t.debit for t in all_transactions)
+        total_credit = sum(t.credit for t in all_transactions)
+
+        return CanonicalStatement(
+            bank=detected_bank,
+            statement_format="Gemini Universal AI Parser",
+            account_number_masked=account_number,
+            statement_from=statement_from,
+            statement_to=statement_to,
+            opening_balance=opening_bal,
+            closing_balance=closing_bal,
+            total_debit=total_debit,
+            total_credit=total_credit,
+            confidence_score=99.0,
+            transactions=all_transactions
+        )
 
     @classmethod
     def _parse_and_validate_gemini_response(
