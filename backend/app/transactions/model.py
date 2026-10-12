@@ -74,7 +74,7 @@ class PageDiagnosticSummary(BaseModel):
 
 class CanonicalStatement(BaseModel):
     bank: str
-    statement_format: str = "Standard"
+    statement_format: Optional[str] = "Standard"
     account_number_masked: Optional[str] = None
     statement_from: Optional[date] = None
     statement_to: Optional[date] = None

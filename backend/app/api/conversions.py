@@ -130,8 +130,8 @@ def _ensure_job_statement(job: Dict[str, Any]) -> CanonicalStatement:
             except Exception:
                 pass
     statement = CanonicalStatement(
-        bank=job.get("bank_name", "Bank"),
-        statement_format=job.get("statement_format", "Standard"),
+        bank=job.get("bank_name") or "Bank",
+        statement_format=job.get("statement_format") or "Standard",
         transactions=tx_items,
         opening_balance=Decimal(str(job["opening_balance"])) if job.get("opening_balance") is not None else None,
         closing_balance=Decimal(str(job["closing_balance"])) if job.get("closing_balance") is not None else None,
@@ -141,6 +141,121 @@ def _ensure_job_statement(job: Dict[str, Any]) -> CanonicalStatement:
     job["statement"] = statement
     job["transactions"] = tx_items
     return statement
+
+def _is_authorized_for_job(job: Dict[str, Any], current_user: CurrentUser) -> bool:
+    """Authorizes job access if user is admin, matches user_id, or matches user_email."""
+    if current_user.role in ("ADMIN", "SUPER_ADMIN") or current_user.is_admin:
+        return True
+    if str(job.get("user_id") or "").strip() == str(current_user.id).strip():
+        return True
+    if current_user.email and str(job.get("user_email") or "").strip().lower() == current_user.email.strip().lower():
+        return True
+    return False
+
+def _ensure_job_debit_credit(job: Dict[str, Any]):
+    """Guarantees total_debit and total_credit are present and non-null on job."""
+    if job.get("total_debit") is None or job.get("total_credit") is None:
+        txs = job.get("transactions") or []
+        deb = Decimal("0.00")
+        cred = Decimal("0.00")
+        for t in txs:
+            if hasattr(t, "debit"):
+                deb += t.debit
+                cred += t.credit
+            elif isinstance(t, dict):
+                deb += Decimal(str(t.get("debit") or 0.0))
+                cred += Decimal(str(t.get("credit") or 0.0))
+        if job.get("total_debit") is None:
+            job["total_debit"] = deb
+        if job.get("total_credit") is None:
+            job["total_credit"] = cred
+
+def _get_or_restore_job(job_id: str) -> Optional[Dict[str, Any]]:
+    """Retrieves conversion job from in-memory cache, restoring from SQLite persistence if evicted/restarted."""
+    job = IN_MEMORY_JOBS.get(job_id)
+    if job:
+        _ensure_job_statement(job)
+        _ensure_job_debit_credit(job)
+        return job
+
+    db_rec = db.get_conversion_by_id(job_id)
+    if not db_rec:
+        return None
+
+    meta = {}
+    if db_rec.get("metadata_json"):
+        try:
+            meta = json.loads(db_rec["metadata_json"])
+        except Exception:
+            pass
+
+    raw_txs = meta.get("transactions") or []
+    tx_items = []
+    for t in raw_txs:
+        try:
+            tx_items.append(TransactionItem(**t))
+        except Exception:
+            pass
+
+    total_deb = Decimal(str(meta.get("total_debit") if meta.get("total_debit") is not None else sum(t.debit for t in tx_items)))
+    total_cred = Decimal(str(meta.get("total_credit") if meta.get("total_credit") is not None else sum(t.credit for t in tx_items)))
+    error_cnt = sum(1 for t in tx_items if t.validation_status == "ERROR")
+
+    job = {
+        "id": db_rec["id"],
+        "user_id": db_rec["user_id"],
+        "user_email": db_rec.get("user_email", ""),
+        "file_name": db_rec["file_name"],
+        "bank_name": db_rec["bank_name"],
+        "statement_format": meta.get("parser_name") or db_rec.get("bank_name") or "Standard",
+        "page_count": db_rec["total_pdf_pages"],
+        "total_pdf_pages": db_rec["total_pdf_pages"],
+        "pages_processed": db_rec["pages_processed"],
+        "pages_skipped": db_rec["pages_skipped"],
+        "pages_pending": db_rec["pages_skipped"],
+        "page_statuses": meta.get("page_statuses") or {
+            str(p): ("PROCESSED" if p <= db_rec["pages_processed"] else "PENDING")
+            for p in range(1, db_rec["total_pdf_pages"] + 1)
+        },
+        "free_quota_used": db_rec["free_quota_used"],
+        "additional_quota_used": db_rec["additional_quota_used"],
+        "is_partial_conversion": bool(db_rec["is_partial_conversion"]),
+        "remaining_pages": db_rec["pages_skipped"],
+        "suggested_additional_price": round(float(db_rec["pages_skipped"] * getattr(settings, "page_price_inr", 2.0)), 2),
+        "transaction_count": len(tx_items) or db_rec["transaction_count"],
+        "raw_transaction_count": len(tx_items) or db_rec["transaction_count"],
+        "suspense_count": sum(1 for t in tx_items if (t.ledger_name == "Suspense" or not t.ledger_name)),
+        "mapped_count": sum(1 for t in tx_items if (t.ledger_name and t.ledger_name != "Suspense")),
+        "duplicate_count": sum(1 for t in tx_items if getattr(t, "is_duplicate_suspect", False)),
+        "reverse_entries_count": sum(1 for t in tx_items if getattr(t, "is_reverse_entry", False)),
+        "reverse_pairs_count": len(set(t.reversal_pair_id for t in tx_items if getattr(t, "reversal_pair_id", None))),
+        "reverse_unmatched_count": sum(1 for t in tx_items if getattr(t, "is_reverse_entry", False) and getattr(t, "reversal_leg", "") == "UNPAIRED"),
+        "warning_count": sum(1 for t in tx_items if t.validation_status == "WARNING"),
+        "error_count": error_cnt,
+        "ready_for_export": error_cnt == 0,
+        "bank_ledger_name": meta.get("bank_ledger_name", "Bank Account"),
+        "cash_ledger_name": meta.get("cash_ledger_name", "Cash"),
+        "status": db_rec["status"],
+        "confidence_score": float(meta.get("confidence_score") or 100.0),
+        "confidence_tier": meta.get("confidence_tier") or "HIGH",
+        "parser_name": meta.get("parser_name") or db_rec.get("bank_name") or "Standard",
+        "balance_status": "VALID",
+        "created_at": db_rec["created_at"],
+        "total_debit": total_deb,
+        "total_credit": total_cred,
+        "opening_balance": Decimal(str(meta["opening_balance"])) if meta.get("opening_balance") is not None else None,
+        "closing_balance": Decimal(str(meta["closing_balance"])) if meta.get("closing_balance") is not None else None,
+        "transactions": tx_items,
+        "pdf_path": meta.get("pdf_path"),
+        "password": meta.get("password"),
+        "excel_path": meta.get("excel_path"),
+        "xml_path": meta.get("xml_path"),
+        "excel_filename": meta.get("excel_filename"),
+        "xml_filename": meta.get("xml_filename")
+    }
+    _ensure_job_statement(job)
+    IN_MEMORY_JOBS[db_rec["id"]] = job
+    return job
 
 USER_SAVED_RULES: Dict[str, Dict[str, str]] = {}
 
@@ -194,7 +309,7 @@ class ConversionJobSummary(BaseModel):
     is_partial_conversion: bool = False
     remaining_pages: int = 0
     suggested_additional_price: float = 0.0
-    transaction_count: int
+    transaction_count: int = 0
     rejected_transaction_count: int = 0
     raw_transaction_count: int = 0
     suspense_count: int = 0
@@ -209,9 +324,9 @@ class ConversionJobSummary(BaseModel):
     page_diagnostics: List[Any] = []
     bank_ledger_name: str = "Bank Account"
     cash_ledger_name: str = "Cash"
-    status: str  # "COMPLETED" | "PARTIALLY_COMPLETED" | "NEEDS_REVIEW" | "AMBIGUOUS_BANK" | "QUOTA_EXHAUSTED"
-    confidence_score: float
-    confidence_tier: str = "HIGH"  # "HIGH" | "MEDIUM" | "LOW" | "AMBIGUOUS"
+    status: str = "COMPLETED"  # "COMPLETED" | "PARTIALLY_COMPLETED" | "NEEDS_REVIEW" | "AMBIGUOUS_BANK" | "QUOTA_EXHAUSTED"
+    confidence_score: Optional[float] = 100.0
+    confidence_tier: Optional[str] = "HIGH"  # "HIGH" | "MEDIUM" | "LOW" | "AMBIGUOUS"
     is_ambiguous: bool = False
     parser_name: Optional[str] = None
     detected_ifsc: Optional[str] = None
@@ -223,9 +338,9 @@ class ConversionJobSummary(BaseModel):
     statement_to: Optional[date] = None
     opening_balance: Optional[Decimal] = None
     closing_balance: Optional[Decimal] = None
-    total_debit: Decimal
-    total_credit: Decimal
-    created_at: datetime
+    total_debit: Decimal = Decimal("0.00")
+    total_credit: Decimal = Decimal("0.00")
+    created_at: Any = None
     override_warning: Optional[str] = None
     candidates: List[Any] = []
     error_message: Optional[str] = None
@@ -807,10 +922,10 @@ async def select_bank_manually(
     current_user: CurrentUser = Depends(get_current_user)
 ):
     """User manually selects bank after ambiguous detection."""
-    job = IN_MEMORY_JOBS.get(job_id)
+    job = _get_or_restore_job(job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Conversion job not found.")
-    if job["user_id"] != current_user.id and current_user.role not in ("ADMIN", "SUPER_ADMIN"):
+    if not _is_authorized_for_job(job, current_user):
         raise HTTPException(status_code=403, detail="Access denied.")
 
     pdf_path = job.get("pdf_path")
@@ -917,13 +1032,13 @@ async def review_transactions(
     current_user: CurrentUser = Depends(get_current_user)
 ):
     """Allows user to edit dates, narrations, amounts, ledger names, and voucher types before XML generation."""
-    job = IN_MEMORY_JOBS.get(job_id)
+    job = _get_or_restore_job(job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Conversion job not found.")
-    if job["user_id"] != current_user.id and current_user.role not in ("ADMIN", "SUPER_ADMIN"):
+    if not _is_authorized_for_job(job, current_user):
         raise HTTPException(status_code=403, detail="Access denied.")
 
-    statement: CanonicalStatement = job["statement"]
+    statement: CanonicalStatement = _ensure_job_statement(job)
     statement.transactions = req.transactions
 
     if req.bank_ledger_name and req.bank_ledger_name.strip():
@@ -1003,10 +1118,10 @@ async def update_single_row(
     current_user: CurrentUser = Depends(get_current_user)
 ):
     """Updates a single transaction row's ledger, voucher type, or instrument number."""
-    job = IN_MEMORY_JOBS.get(job_id)
+    job = _get_or_restore_job(job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Conversion job not found.")
-    if job["user_id"] != current_user.id and current_user.role not in ("ADMIN", "SUPER_ADMIN"):
+    if not _is_authorized_for_job(job, current_user):
         raise HTTPException(status_code=403, detail="Access denied.")
 
     statement: CanonicalStatement = _ensure_job_statement(job)
@@ -1073,10 +1188,10 @@ async def bulk_assign_ledger(
     Assigns a ledger to multiple selected transactions.
     If apply_to_similar is True, propagates to all transactions with similar narrations/parties.
     """
-    job = IN_MEMORY_JOBS.get(job_id)
+    job = _get_or_restore_job(job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Conversion job not found.")
-    if job["user_id"] != current_user.id and current_user.role not in ("ADMIN", "SUPER_ADMIN"):
+    if not _is_authorized_for_job(job, current_user):
         raise HTTPException(status_code=403, detail="Access denied.")
 
     statement: CanonicalStatement = _ensure_job_statement(job)
@@ -1262,9 +1377,11 @@ async def get_conversion_reversals(
     """
     PRD Section 11.5: Returns Reverse Entries report and detailed paired/unpaired rows.
     """
-    job = IN_MEMORY_JOBS.get(job_id)
+    job = _get_or_restore_job(job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Conversion job not found.")
+    if not _is_authorized_for_job(job, current_user):
+        raise HTTPException(status_code=403, detail="Access denied.")
     statement = _ensure_job_statement(job)
     
     pairs_map: Dict[str, Dict[str, Any]] = {}
@@ -1352,9 +1469,11 @@ async def pair_reversal_rows(
     current_user: CurrentUser = Depends(get_current_user)
 ):
     """Manually pair two rows as reverse entries."""
-    job = IN_MEMORY_JOBS.get(job_id)
+    job = _get_or_restore_job(job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Conversion job not found.")
+    if not _is_authorized_for_job(job, current_user):
+        raise HTTPException(status_code=403, detail="Access denied.")
     statement = _ensure_job_statement(job)
 
     r1 = next((t for t in statement.transactions if t.row_index == req.row_index_1), None)
@@ -1388,9 +1507,11 @@ async def unpair_reversal_row(
     current_user: CurrentUser = Depends(get_current_user)
 ):
     """Unpairs a reverse entry row."""
-    job = IN_MEMORY_JOBS.get(job_id)
+    job = _get_or_restore_job(job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Conversion job not found.")
+    if not _is_authorized_for_job(job, current_user):
+        raise HTTPException(status_code=403, detail="Access denied.")
     statement = _ensure_job_statement(job)
 
     target_tx = next((t for t in statement.transactions if t.row_index == req.row_index), None)
@@ -1411,6 +1532,7 @@ async def unpair_reversal_row(
     return await get_conversion_job(job_id=job_id, current_user=current_user)
 
 @router.post("/{job_id}/generate")
+@router.post("/{job_id}/generate-xml")
 async def generate_tally_xml_endpoint(
     job_id: str,
     req: Optional[GenerateTallyXMLRequest] = None,
@@ -1421,10 +1543,10 @@ async def generate_tally_xml_endpoint(
     Verifies transaction count reconciliation, balance integrity, and double-entry balancing.
     Consumes the exact same FinalConversionSnapshot as Excel.
     """
-    job = IN_MEMORY_JOBS.get(job_id)
+    job = _get_or_restore_job(job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Conversion job not found.")
-    if job["user_id"] != current_user.id and current_user.role not in ("ADMIN", "SUPER_ADMIN"):
+    if not _is_authorized_for_job(job, current_user):
         raise HTTPException(status_code=403, detail="Access denied.")
 
     statement: CanonicalStatement = _ensure_job_statement(job)
@@ -1518,10 +1640,10 @@ async def generate_excel_endpoint(
     - Strict mathematical balance validation.
     - Read-only export: NEVER consumes daily page quota.
     """
-    job = IN_MEMORY_JOBS.get(job_id)
+    job = _get_or_restore_job(job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Conversion job not found.")
-    if job["user_id"] != current_user.id and current_user.role not in ("ADMIN", "SUPER_ADMIN"):
+    if not _is_authorized_for_job(job, current_user):
         raise HTTPException(status_code=403, detail="Access denied.")
 
     statement: CanonicalStatement = _ensure_job_statement(job)
@@ -1585,39 +1707,111 @@ async def generate_excel_endpoint(
     }
 
 @router.get("/{job_id}/download-excel")
+@router.get("/{job_id}/excel")
 async def download_excel_endpoint(
     job_id: str,
     current_user: CurrentUser = Depends(get_current_user)
 ):
-    """Downloads the verified conversion Excel (.xlsx) file."""
-    job = IN_MEMORY_JOBS.get(job_id)
-    if not job or not job.get("excel_path") or not os.path.exists(job["excel_path"]):
-        raise HTTPException(status_code=404, detail="Generated Excel file not found or expired. Please generate first.")
-    if job["user_id"] != current_user.id and current_user.role not in ("ADMIN", "SUPER_ADMIN"):
+    """Downloads the verified conversion Excel (.xlsx) file, generating on-demand if missing from disk."""
+    job = _get_or_restore_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Conversion job not found.")
+    if not _is_authorized_for_job(job, current_user):
         raise HTTPException(status_code=403, detail="Access denied.")
 
+    excel_path = job.get("excel_path")
+    excel_filename = job.get("excel_filename")
+
+    # If file is missing on disk (e.g. Render container restart), regenerate it from snapshot
+    if not excel_path or not os.path.exists(excel_path):
+        statement = _ensure_job_statement(job)
+        if not statement or not statement.transactions:
+            raise HTTPException(status_code=404, detail="No transactions found to generate Excel file.")
+        
+        snapshot = _get_or_create_final_snapshot(job)
+        excel_generator = TallyExcelGenerator(
+            default_bank_ledger=snapshot.bank_ledger_name,
+            default_cash_ledger=snapshot.cash_ledger_name
+        )
+        excel_bytes = excel_generator.generate_excel_bytes(snapshot)
+        excel_filename = excel_generator.generate_filename(snapshot, bank_name=job.get("bank_name"))
+
+        os.makedirs(TEMP_PROCESSING_DIR, exist_ok=True)
+        excel_path = os.path.join(TEMP_PROCESSING_DIR, f"{job_id}.xlsx")
+        with open(excel_path, "wb") as f:
+            f.write(excel_bytes)
+
+        job["excel_path"] = excel_path
+        job["excel_filename"] = excel_filename
+        try:
+            db.save_conversion(job)
+        except Exception:
+            pass
+
     return FileResponse(
-        path=job["excel_path"],
-        filename=job["excel_filename"],
-        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        path=excel_path,
+        filename=excel_filename or f"{job_id}.xlsx",
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Access-Control-Expose-Headers": "Content-Disposition"}
     )
 
 @router.get("/{job_id}/download")
+@router.get("/{job_id}/download-xml")
+@router.get("/{job_id}/xml")
 async def download_tally_xml_endpoint(
     job_id: str,
     current_user: CurrentUser = Depends(get_current_user)
 ):
-    """Downloads the verified Tally XML file."""
-    job = IN_MEMORY_JOBS.get(job_id)
-    if not job or not job.get("xml_path") or not os.path.exists(job["xml_path"]):
-        raise HTTPException(status_code=404, detail="Generated XML file not found or expired.")
-    if job["user_id"] != current_user.id and current_user.role not in ("ADMIN", "SUPER_ADMIN"):
+    """Downloads the verified Tally XML file, generating on-demand if missing from disk."""
+    job = _get_or_restore_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Conversion job not found.")
+    if not _is_authorized_for_job(job, current_user):
         raise HTTPException(status_code=403, detail="Access denied.")
 
+    xml_path = job.get("xml_path")
+    xml_filename = job.get("xml_filename")
+
+    # If file is missing on disk (e.g. Render container restart), regenerate it from snapshot
+    if not xml_path or not os.path.exists(xml_path):
+        statement = _ensure_job_statement(job)
+        if not statement or not statement.transactions:
+            raise HTTPException(status_code=404, detail="No transactions found to generate XML file.")
+
+        snapshot = _get_or_create_final_snapshot(job)
+        generator = TallyXMLGenerator(
+            default_bank_ledger=snapshot.bank_ledger_name,
+            default_cash_ledger=snapshot.cash_ledger_name
+        )
+        xml_content = generator.generate_xml(
+            snapshot,
+            bank_ledger_name=snapshot.bank_ledger_name,
+            cash_ledger_name=snapshot.cash_ledger_name
+        )
+
+        clean_bank = re.sub(r'[^A-Za-z0-9_]', '', job.get("bank_name", "Bank").split()[0])
+        from_str = snapshot.statement_from.strftime("%Y-%m-%d") if snapshot.statement_from else "Statement"
+        to_str = snapshot.statement_to.strftime("%Y-%m-%d") if snapshot.statement_to else "Export"
+        xml_filename = f"{clean_bank}_Statement_{from_str}_to_{to_str}.xml"
+
+        os.makedirs(TEMP_PROCESSING_DIR, exist_ok=True)
+        xml_path = os.path.join(TEMP_PROCESSING_DIR, f"{job_id}.xml")
+        with open(xml_path, "w", encoding="utf-8") as f:
+            f.write(xml_content)
+
+        job["xml_path"] = xml_path
+        job["xml_filename"] = xml_filename
+        job["xml_content"] = xml_content
+        try:
+            db.save_conversion(job)
+        except Exception:
+            pass
+
     return FileResponse(
-        path=job["xml_path"],
-        filename=job["xml_filename"],
-        media_type="application/xml"
+        path=xml_path,
+        filename=xml_filename or f"{job_id}.xml",
+        media_type="application/xml",
+        headers={"Access-Control-Expose-Headers": "Content-Disposition"}
     )
 
 @router.get("/active/recent", response_model=Optional[ConversionJobSummary])
@@ -1626,76 +1820,29 @@ async def get_recent_active_conversion(current_user: CurrentUser = Depends(get_c
     Retrieves the user's most recent active conversion workspace.
     Enables instant session continuation across page refresh, token renewal, or route change.
     """
-    # 1. Check in-memory jobs first
-    user_jobs = [
-        j for j in IN_MEMORY_JOBS.values() 
-        if (j.get("user_id") == current_user.id or j.get("user_email") == current_user.email)
-        and j.get("status") in ("COMPLETED", "PARTIALLY_COMPLETED", "NEEDS_REVIEW")
-    ]
-    if user_jobs:
-        user_jobs.sort(key=lambda x: str(x.get("created_at", "")), reverse=True)
-        return ConversionJobSummary(**user_jobs[0])
+    try:
+        # 1. Check in-memory jobs first
+        user_jobs = [
+            j for j in IN_MEMORY_JOBS.values() 
+            if (j.get("user_id") == current_user.id or j.get("user_email") == current_user.email)
+            and j.get("status") in ("COMPLETED", "PARTIALLY_COMPLETED", "NEEDS_REVIEW")
+        ]
+        if user_jobs:
+            user_jobs.sort(key=lambda x: str(x.get("created_at", "")), reverse=True)
+            _ensure_job_debit_credit(user_jobs[0])
+            return ConversionJobSummary(**user_jobs[0])
 
-    # 2. Check SQLite persistent store
-    db_rec = db.get_latest_active_conversion(current_user.id) or (db.get_latest_active_conversion(current_user.email) if current_user.email else None)
-    if db_rec:
-        meta = {}
-        if db_rec.get("metadata_json"):
-            try:
-                meta = json.loads(db_rec["metadata_json"])
-            except Exception:
-                pass
-        raw_txs = meta.get("transactions") or []
-        tx_items = []
-        for t in raw_txs:
-            try:
-                tx_items.append(TransactionItem(**t))
-            except Exception:
-                pass
+        # 2. Check SQLite persistent store
+        db_rec = db.get_latest_active_conversion(current_user.id) or (db.get_latest_active_conversion(current_user.email) if current_user.email else None)
+        if db_rec:
+            restored = _get_or_restore_job(db_rec["id"])
+            if restored:
+                return ConversionJobSummary(**restored)
 
-        error_cnt = sum(1 for t in tx_items if t.validation_status == "ERROR")
-        job_dict = {
-            "id": db_rec["id"],
-            "user_id": db_rec["user_id"],
-            "user_email": db_rec.get("user_email", ""),
-            "file_name": db_rec["file_name"],
-            "bank_name": db_rec["bank_name"],
-            "statement_format": meta.get("parser_name", "Standard"),
-            "page_count": db_rec["total_pdf_pages"],
-            "total_pdf_pages": db_rec["total_pdf_pages"],
-            "pages_processed": db_rec["pages_processed"],
-            "pages_skipped": db_rec["pages_skipped"],
-            "pages_pending": db_rec["pages_skipped"],
-            "page_statuses": meta.get("page_statuses") or {str(p): ("PROCESSED" if p <= db_rec["pages_processed"] else "PENDING") for p in range(1, db_rec["total_pdf_pages"] + 1)},
-            "free_quota_used": db_rec["free_quota_used"],
-            "additional_quota_used": db_rec["additional_quota_used"],
-            "is_partial_conversion": bool(db_rec["is_partial_conversion"]),
-            "remaining_pages": db_rec["pages_skipped"],
-            "suggested_additional_price": round(float(db_rec["pages_skipped"] * getattr(settings, "page_price_inr", 2.0)), 2),
-            "transaction_count": len(tx_items) or db_rec["transaction_count"],
-            "raw_transaction_count": len(tx_items) or db_rec["transaction_count"],
-            "suspense_count": sum(1 for t in tx_items if (t.ledger_name == "Suspense" or not t.ledger_name)),
-            "mapped_count": sum(1 for t in tx_items if (t.ledger_name and t.ledger_name != "Suspense")),
-            "duplicate_count": sum(1 for t in tx_items if getattr(t, "is_duplicate_suspect", False)),
-            "warning_count": sum(1 for t in tx_items if t.validation_status == "WARNING"),
-            "error_count": error_cnt,
-            "ready_for_export": error_cnt == 0,
-            "bank_ledger_name": meta.get("bank_ledger_name", "Bank Account"),
-            "cash_ledger_name": meta.get("cash_ledger_name", "Cash"),
-            "status": db_rec["status"],
-            "confidence_score": meta.get("confidence_score", 100.0),
-            "confidence_tier": meta.get("confidence_tier", "HIGH"),
-            "parser_name": meta.get("parser_name", db_rec["bank_name"]),
-            "balance_status": "VALID",
-            "created_at": db_rec["created_at"],
-            "transactions": tx_items,
-            "pdf_path": meta.get("pdf_path"),
-            "password": meta.get("password")
-        }
-        IN_MEMORY_JOBS[db_rec["id"]] = job_dict
-        return ConversionJobSummary(**job_dict)
-
-    return None
+        return None
+    except Exception as e:
+        app_logger.warning(f"Error retrieving recent active conversion: {e}")
+        return None
 
 @router.get("/{job_id}", response_model=ConversionJobSummary)
 async def get_conversion_job(
@@ -1703,70 +1850,10 @@ async def get_conversion_job(
     current_user: CurrentUser = Depends(get_current_user)
 ):
     """Retrieves conversion job details by ID with SQLite persistence fallback."""
-    job = IN_MEMORY_JOBS.get(job_id)
-    if not job:
-        db_rec = db.get_conversion_by_id(job_id)
-        if db_rec:
-            meta = {}
-            if db_rec.get("metadata_json"):
-                try:
-                    meta = json.loads(db_rec["metadata_json"])
-                except Exception:
-                    pass
-            raw_txs = meta.get("transactions") or []
-            tx_items = []
-            for t in raw_txs:
-                try:
-                    tx_items.append(TransactionItem(**t))
-                except Exception:
-                    pass
-            error_cnt = sum(1 for t in tx_items if t.validation_status == "ERROR")
-            job = {
-                "id": db_rec["id"],
-                "user_id": db_rec["user_id"],
-                "user_email": db_rec.get("user_email", ""),
-                "file_name": db_rec["file_name"],
-                "bank_name": db_rec["bank_name"],
-                "statement_format": meta.get("parser_name", "Standard"),
-                "page_count": db_rec["total_pdf_pages"],
-                "total_pdf_pages": db_rec["total_pdf_pages"],
-                "pages_processed": db_rec["pages_processed"],
-                "pages_skipped": db_rec["pages_skipped"],
-                "pages_pending": db_rec["pages_skipped"],
-                "page_statuses": meta.get("page_statuses") or {str(p): ("PROCESSED" if p <= db_rec["pages_processed"] else "PENDING") for p in range(1, db_rec["total_pdf_pages"] + 1)},
-                "free_quota_used": db_rec["free_quota_used"],
-                "additional_quota_used": db_rec["additional_quota_used"],
-                "is_partial_conversion": bool(db_rec["is_partial_conversion"]),
-                "remaining_pages": db_rec["pages_skipped"],
-                "suggested_additional_price": round(float(db_rec["pages_skipped"] * getattr(settings, "page_price_inr", 2.0)), 2),
-                "transaction_count": len(tx_items) or db_rec["transaction_count"],
-                "raw_transaction_count": len(tx_items) or db_rec["transaction_count"],
-                "suspense_count": sum(1 for t in tx_items if (t.ledger_name == "Suspense" or not t.ledger_name)),
-                "mapped_count": sum(1 for t in tx_items if (t.ledger_name and t.ledger_name != "Suspense")),
-                "duplicate_count": sum(1 for t in tx_items if getattr(t, "is_duplicate_suspect", False)),
-                "reverse_entries_count": sum(1 for t in tx_items if getattr(t, "is_reverse_entry", False)),
-                "reverse_pairs_count": len(set(t.reversal_pair_id for t in tx_items if getattr(t, "reversal_pair_id", None))),
-                "reverse_unmatched_count": sum(1 for t in tx_items if getattr(t, "is_reverse_entry", False) and getattr(t, "reversal_leg", "") == "UNPAIRED"),
-                "warning_count": sum(1 for t in tx_items if t.validation_status == "WARNING"),
-                "error_count": error_cnt,
-                "ready_for_export": error_cnt == 0,
-                "bank_ledger_name": meta.get("bank_ledger_name", "Bank Account"),
-                "cash_ledger_name": meta.get("cash_ledger_name", "Cash"),
-                "status": db_rec["status"],
-                "confidence_score": meta.get("confidence_score", 100.0),
-                "confidence_tier": meta.get("confidence_tier", "HIGH"),
-                "parser_name": meta.get("parser_name", db_rec["bank_name"]),
-                "balance_status": "VALID",
-                "created_at": db_rec["created_at"],
-                "transactions": tx_items,
-                "pdf_path": meta.get("pdf_path"),
-                "password": meta.get("password")
-            }
-            IN_MEMORY_JOBS[db_rec["id"]] = job
-
+    job = _get_or_restore_job(job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Conversion job not found.")
-    if job["user_id"] != current_user.id and current_user.role not in ("ADMIN", "SUPER_ADMIN"):
+    if not _is_authorized_for_job(job, current_user):
         raise HTTPException(status_code=403, detail="Access denied.")
     return ConversionJobSummary(**job)
 
@@ -1780,10 +1867,10 @@ async def process_remaining_pages(
     Does NOT re-process already converted pages (1..N).
     Deducts quota: free quota first, then additional purchased balance.
     """
-    job = IN_MEMORY_JOBS.get(job_id)
+    job = _get_or_restore_job(job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Conversion job not found.")
-    if job["user_id"] != current_user.id and current_user.role not in ("ADMIN", "SUPER_ADMIN"):
+    if not _is_authorized_for_job(job, current_user):
         raise HTTPException(status_code=403, detail="Access denied.")
 
     pages_skipped = job.get("pages_skipped", 0)

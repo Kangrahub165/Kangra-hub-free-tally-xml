@@ -2700,7 +2700,8 @@ export default function ConvertPage() {
                 size="lg"
                 onClick={() => {
                   if (excelResult) {
-                    downloadFileBlob(excelResult.download_url, excelResult.filename);
+                    downloadFileBlob(excelResult.download_url, excelResult.filename)
+                      .catch((err) => setErrorMsg(err.message || 'Failed to download Excel file.'));
                   } else {
                     handleDownloadExcel();
                   }
@@ -2717,7 +2718,10 @@ export default function ConvertPage() {
                 <Button
                   variant="success"
                   size="lg"
-                  onClick={() => downloadFileBlob(xmlResult.download_url, xmlResult.filename)}
+                  onClick={() => {
+                    downloadFileBlob(xmlResult.download_url, xmlResult.filename)
+                      .catch((err) => setErrorMsg(err.message || 'Failed to download Tally XML file.'));
+                  }}
                   className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-3.5 shadow-md"
                   icon={<Download className="w-4 h-4" />}
                 >

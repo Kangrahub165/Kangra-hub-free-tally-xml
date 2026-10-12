@@ -138,7 +138,11 @@ async def ensure_cors_headers(request: Request, call_next):
 # Global Exception Handlers
 @app.exception_handler(HTTPException)
 async def handle_http_exception(request: Request, exc: HTTPException):
-    content = exc.detail if isinstance(exc.detail, dict) else {"detail": exc.detail}
+    if isinstance(exc.detail, dict):
+        content = dict(exc.detail)
+        content["detail"] = exc.detail
+    else:
+        content = {"detail": exc.detail, "message": str(exc.detail)}
     resp = JSONResponse(status_code=exc.status_code, content=content)
     return apply_cors_headers(resp, request)
 

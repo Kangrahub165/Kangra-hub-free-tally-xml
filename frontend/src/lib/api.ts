@@ -948,8 +948,14 @@ export async function downloadFileBlob(downloadUrl: string, filename: string): P
   const token = getAuthToken();
   let fullUrl = downloadUrl;
   if (!fullUrl.startsWith('http://') && !fullUrl.startsWith('https://')) {
-    const base = API_BASE.replace(/\/api$/, '');
-    fullUrl = `${base}${downloadUrl.startsWith('/') ? '' : '/'}${downloadUrl}`;
+    if (downloadUrl.startsWith('/api/') || downloadUrl.startsWith('api/')) {
+      const base = API_BASE.replace(/\/api\/?$/, '');
+      const path = downloadUrl.startsWith('/') ? downloadUrl : `/${downloadUrl}`;
+      fullUrl = `${base}${path}`;
+    } else {
+      const cleanPath = downloadUrl.startsWith('/') ? downloadUrl : `/${downloadUrl}`;
+      fullUrl = `${API_BASE.replace(/\/$/, '')}${cleanPath}`;
+    }
   }
 
   // Append token to query parameter for maximum browser compatibility
