@@ -14,6 +14,9 @@ class CurrentUser(BaseModel):
     is_unlimited: bool = False
     full_name: Optional[str] = "Kangra Hub User"
     mobile_number: Optional[str] = None
+    subscription_plan_id: Optional[str] = None
+    subscription_plan_name: Optional[str] = None
+    subscription_bill_limit: Optional[int] = None
 
     @property
     def is_admin(self) -> bool:
@@ -23,8 +26,10 @@ class CurrentUser(BaseModel):
 
     @property
     def has_quota_bypass(self) -> bool:
-        # Quota bypass applies to daily page conversion limits only.
-        return self.is_admin or self.is_unlimited
+        # Quota bypass applies to daily page/bill conversion limits only.
+        if self.is_admin:
+            return True
+        return self.is_unlimited
 
 async def get_current_user(
     authorization: Optional[str] = Header(None),
@@ -102,6 +107,24 @@ async def get_current_user(
         # Standard user is ONLY unlimited if explicitly set in SQLite by Admin!
         is_unlim = is_admin_user or (bool(db_u.get("is_unlimited")) if db_u else bool(active_sess.get("is_unlimited", False)))
 
+        # Resolve active subscription details
+        sub_plan_id = None
+        sub_plan_name = None
+        sub_bill_limit = None
+        try:
+            mem = db.get_active_staff_membership(user_id, email)
+            if mem:
+                sub_plan_id = mem.get("plan_id")
+                sub_plan_name = mem.get("plan_name")
+                sub_bill_limit = mem.get("bills_limit")
+                if mem.get("is_unlimited") or sub_bill_limit == -1:
+                    is_unlim = True
+            elif db_u and db_u.get("subscription_plan_id"):
+                sub_plan_id = db_u.get("subscription_plan_id")
+                sub_bill_limit = db_u.get("subscription_bill_limit")
+        except Exception:
+            pass
+
         try:
             from app.core.user_store import register_user
             register_user(
@@ -120,7 +143,10 @@ async def get_current_user(
             email=email,
             role=role,
             is_unlimited=is_unlim,
-            full_name=active_sess.get("full_name") or email.split("@")[0].capitalize()
+            full_name=active_sess.get("full_name") or email.split("@")[0].capitalize(),
+            subscription_plan_id=sub_plan_id,
+            subscription_plan_name=sub_plan_name,
+            subscription_bill_limit=sub_bill_limit
         )
 
     # In development mode, support mock tokens for seamless local testing
@@ -279,7 +305,7 @@ async def get_current_user(
 
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Supabase authentication service is not configured on the server. Please configure SUPABASE_URL and SUPABASE_ANON_KEY in backend/.env."
+            detail="Supabase authentication service is not configured on the server. Please configure SUPABASE_URL and SUPABASE_ANON_KEY in the backend environment variables."
         )
 
     # 2. Verify token with Supabase Auth

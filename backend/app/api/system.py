@@ -114,7 +114,7 @@ async def admin_login(payload: AdminLoginRequest):
     if not SupabaseService.is_configured():
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Supabase authentication service is not configured on the server. Please configure SUPABASE_URL and SUPABASE_ANON_KEY in backend/.env."
+            detail="Supabase authentication service is not configured on the server. Please configure SUPABASE_URL and SUPABASE_ANON_KEY in the backend environment variables."
         )
 
     # 2. Authenticate against Supabase Auth

@@ -149,12 +149,18 @@ async def health_check():
     from app.core.smtp_service import smtp_service
     from datetime import datetime, timezone
 
+    is_sb_configured = SupabaseService.is_configured()
+    sb_url = SupabaseService.get_url()
+    sb_key = SupabaseService.get_api_key()
+
     return {
         "status": "healthy",
         "app": settings.app_name,
         "site_mode": settings.site_mode,
         "app_env": getattr(settings, "app_env", "production"),
-        "supabase_connected": SupabaseService.is_configured(),
+        "supabase_connected": is_sb_configured,
+        "supabase_url_configured": bool(sb_url),
+        "supabase_key_configured": bool(sb_key),
         "smtp_configured": smtp_service.is_configured(),
         "timestamp": datetime.now(timezone.utc).isoformat()
     }

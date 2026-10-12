@@ -23,6 +23,22 @@ class Settings(BaseSettings):
     supabase_url: str = ""
     supabase_anon_key: str = ""
     supabase_service_role_key: str = ""
+
+    def model_post_init(self, __context):
+        if not self.supabase_url:
+            self.supabase_url = os.getenv("NEXT_PUBLIC_SUPABASE_URL", "").strip()
+        if self.supabase_url:
+            self.supabase_url = self.supabase_url.strip().rstrip("/")
+
+        if not self.supabase_anon_key:
+            self.supabase_anon_key = os.getenv("NEXT_PUBLIC_SUPABASE_ANON_KEY", "").strip()
+        else:
+            self.supabase_anon_key = self.supabase_anon_key.strip()
+
+        if not self.supabase_service_role_key:
+            self.supabase_service_role_key = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "").strip()
+        else:
+            self.supabase_service_role_key = self.supabase_service_role_key.strip()
     frontend_url: str = "http://localhost:3000"
     admin_email: str = "admin@tallyxml.in"
     admin_recovery_email: str = "kangrahub@gmail.com"
@@ -60,6 +76,10 @@ class Settings(BaseSettings):
     payment_upi_id: str = "9418250639@ybl"
     payment_whatsapp_number: str = "+919805987622"
     payment_qr_path: str = "/buy-a-coffee/googlepay_qr.png"
+
+    # Razorpay Test Mode Configuration
+    razorpay_key_id: str = "rzp_test_Tkc2qtjGZURBIh"
+    razorpay_key_secret: str = "Je6SUgN4dVlRe1N9p15nQOqu"
 
     # Buy a coffee configuration (Admin only)
     buy_coffee_enabled: bool = True

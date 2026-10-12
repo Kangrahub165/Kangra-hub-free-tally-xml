@@ -1,3 +1,4 @@
+import os
 import json
 import logging
 import urllib.request
@@ -13,13 +14,25 @@ class SupabaseService:
     modern publishable keys (sb_publishable_*) without external SDK regex limitations.
     """
 
-    @staticmethod
-    def is_configured() -> bool:
-        return bool(settings.supabase_url and (settings.supabase_anon_key or settings.supabase_service_role_key))
+    @classmethod
+    def get_url(cls) -> str:
+        url = (getattr(settings, "supabase_url", "") or os.getenv("NEXT_PUBLIC_SUPABASE_URL", "")).strip()
+        return url.rstrip('/')
 
-    @staticmethod
-    def get_api_key() -> str:
-        return settings.supabase_anon_key or settings.supabase_service_role_key
+    @classmethod
+    def get_api_key(cls) -> str:
+        return (
+            getattr(settings, "supabase_anon_key", "")
+            or getattr(settings, "supabase_service_role_key", "")
+            or os.getenv("NEXT_PUBLIC_SUPABASE_ANON_KEY", "")
+            or os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")
+        ).strip()
+
+    @classmethod
+    def is_configured(cls) -> bool:
+        url = cls.get_url()
+        key = cls.get_api_key()
+        return bool(url and key and url.startswith("http"))
 
     @classmethod
     def sign_in_with_password(cls, email: str, password: str) -> Dict[str, Any]:
@@ -27,7 +40,7 @@ class SupabaseService:
         if not cls.is_configured():
             raise RuntimeError("Supabase authentication is not configured.")
 
-        url = f"{settings.supabase_url.rstrip('/')}/auth/v1/token?grant_type=password"
+        url = f"{cls.get_url()}/auth/v1/token?grant_type=password"
         payload = json.dumps({"email": email.strip(), "password": password}).encode("utf-8")
         headers = {
             "apikey": cls.get_api_key(),
@@ -55,7 +68,7 @@ class SupabaseService:
         if not cls.is_configured():
             raise RuntimeError("Supabase authentication is not configured.")
 
-        url = f"{settings.supabase_url.rstrip('/')}/auth/v1/signup"
+        url = f"{cls.get_url()}/auth/v1/signup"
         payload_data: Dict[str, Any] = {"email": email.strip(), "password": password}
         if metadata:
             payload_data["data"] = metadata
@@ -87,7 +100,7 @@ class SupabaseService:
         if not cls.is_configured():
             raise RuntimeError("Supabase authentication is not configured.")
 
-        url = f"{settings.supabase_url.rstrip('/')}/auth/v1/token?grant_type=refresh_token"
+        url = f"{cls.get_url()}/auth/v1/token?grant_type=refresh_token"
         payload = json.dumps({"refresh_token": refresh_token.strip()}).encode("utf-8")
         headers = {
             "apikey": cls.get_api_key(),
@@ -115,7 +128,7 @@ class SupabaseService:
         if not cls.is_configured():
             raise RuntimeError("Supabase authentication is not configured.")
 
-        url = f"{settings.supabase_url.rstrip('/')}/auth/v1/user"
+        url = f"{cls.get_url()}/auth/v1/user"
         headers = {
             "apikey": cls.get_api_key(),
             "Authorization": f"Bearer {access_token}"
@@ -140,7 +153,7 @@ class SupabaseService:
         if not cls.is_configured():
             raise RuntimeError("Supabase authentication is not configured.")
 
-        url = f"{settings.supabase_url.rstrip('/')}/auth/v1/recover"
+        url = f"{cls.get_url()}/auth/v1/recover"
         body: Dict[str, Any] = {"email": email.strip()}
         if redirect_to:
             body["redirect_to"] = redirect_to
@@ -171,7 +184,7 @@ class SupabaseService:
             return None
 
         auth_token = settings.supabase_service_role_key or user_token or cls.get_api_key()
-        url = f"{settings.supabase_url.rstrip('/')}/rest/v1/profiles?user_id=eq.{user_id}&select=role,account_status,is_active"
+        url = f"{cls.get_url()}/rest/v1/profiles?user_id=eq.{user_id}&select=role,account_status,is_active"
         headers = {
             "apikey": cls.get_api_key(),
             "Authorization": f"Bearer {auth_token}"
@@ -195,7 +208,7 @@ class SupabaseService:
             return None
 
         auth_token = settings.supabase_service_role_key or user_token or cls.get_api_key()
-        url = f"{settings.supabase_url.rstrip('/')}/rest/v1/user_access?user_id=eq.{user_id}&select=unlimited,access_type"
+        url = f"{cls.get_url()}/rest/v1/user_access?user_id=eq.{user_id}&select=unlimited,access_type"
         headers = {
             "apikey": cls.get_api_key(),
             "Authorization": f"Bearer {auth_token}"
@@ -219,7 +232,7 @@ class SupabaseService:
             return []
 
         auth_token = settings.supabase_service_role_key or user_token or cls.get_api_key()
-        url = f"{settings.supabase_url.rstrip('/')}/rest/v1/profiles?select=*&order=created_at.desc"
+        url = f"{cls.get_url()}/rest/v1/profiles?select=*&order=created_at.desc"
         headers = {
             "apikey": cls.get_api_key(),
             "Authorization": f"Bearer {auth_token}"
@@ -252,7 +265,7 @@ class SupabaseService:
 
         clean_email = email.strip().lower()
         auth_token = settings.supabase_service_role_key or user_token or cls.get_api_key()
-        url = f"{settings.supabase_url.rstrip('/')}/rest/v1/profiles?email=eq.{clean_email}&select=*"
+        url = f"{cls.get_url()}/rest/v1/profiles?email=eq.{clean_email}&select=*"
         headers = {
             "apikey": cls.get_api_key(),
             "Authorization": f"Bearer {auth_token}"
@@ -276,7 +289,7 @@ class SupabaseService:
             return False
 
         auth_token = settings.supabase_service_role_key or user_token or cls.get_api_key()
-        url = f"{settings.supabase_url.rstrip('/')}/rest/v1/profiles"
+        url = f"{cls.get_url()}/rest/v1/profiles"
         payload = json.dumps(profile_data).encode("utf-8")
         headers = {
             "apikey": cls.get_api_key(),
@@ -303,7 +316,7 @@ class SupabaseService:
         auth_token = settings.supabase_service_role_key or admin_token or cls.get_api_key()
 
         # Update profile table
-        url_profile = f"{settings.supabase_url.rstrip('/')}/rest/v1/profiles?user_id=eq.{user_id}"
+        url_profile = f"{cls.get_url()}/rest/v1/profiles?user_id=eq.{user_id}"
         payload = json.dumps({"email": clean_email}).encode("utf-8")
         headers = {
             "apikey": cls.get_api_key(),
@@ -323,7 +336,7 @@ class SupabaseService:
         # Try admin auth update if service role is available
         if settings.supabase_service_role_key:
             try:
-                url_auth = f"{settings.supabase_url.rstrip('/')}/auth/v1/admin/users/{user_id}"
+                url_auth = f"{cls.get_url()}/auth/v1/admin/users/{user_id}"
                 auth_payload = json.dumps({"email": clean_email, "email_confirm": True}).encode("utf-8")
                 auth_headers = {
                     "apikey": settings.supabase_service_role_key,
@@ -344,7 +357,7 @@ class SupabaseService:
         if not cls.is_configured():
             return []
         auth_token = settings.supabase_service_role_key or cls.get_api_key()
-        url = f"{settings.supabase_url.rstrip('/')}/rest/v1/account_appeals?select=*&order=created_at.desc"
+        url = f"{cls.get_url()}/rest/v1/account_appeals?select=*&order=created_at.desc"
         if status and status.upper() != "ALL":
             url += f"&status=eq.{status.lower()}"
         headers = {
@@ -376,7 +389,7 @@ class SupabaseService:
         if not cls.is_configured():
             return None
         auth_token = settings.supabase_service_role_key or cls.get_api_key()
-        url = f"{settings.supabase_url.rstrip('/')}/rest/v1/account_appeals?id=eq.{appeal_id}&select=*"
+        url = f"{cls.get_url()}/rest/v1/account_appeals?id=eq.{appeal_id}&select=*"
         headers = {
             "apikey": cls.get_api_key(),
             "Authorization": f"Bearer {auth_token}"
@@ -398,7 +411,7 @@ class SupabaseService:
         if not cls.is_configured():
             return False
         auth_token = settings.supabase_service_role_key or cls.get_api_key()
-        url = f"{settings.supabase_url.rstrip('/')}/rest/v1/account_appeals"
+        url = f"{cls.get_url()}/rest/v1/account_appeals"
         payload = json.dumps(appeal_data).encode("utf-8")
         headers = {
             "apikey": cls.get_api_key(),
@@ -420,7 +433,7 @@ class SupabaseService:
         if not cls.is_configured():
             return False
         auth_token = settings.supabase_service_role_key or cls.get_api_key()
-        url = f"{settings.supabase_url.rstrip('/')}/rest/v1/account_appeals?id=eq.{appeal_id}"
+        url = f"{cls.get_url()}/rest/v1/account_appeals?id=eq.{appeal_id}"
         payload = json.dumps(update_data).encode("utf-8")
         headers = {
             "apikey": cls.get_api_key(),
@@ -443,7 +456,7 @@ class SupabaseService:
             return []
         clean = identifier.strip().lower()
         auth_token = settings.supabase_service_role_key or cls.get_api_key()
-        url = f"{settings.supabase_url.rstrip('/')}/rest/v1/account_appeals?or=(user_email.eq.{clean},user_id.eq.{clean})&select=*&order=created_at.desc"
+        url = f"{cls.get_url()}/rest/v1/account_appeals?or=(user_email.eq.{clean},user_id.eq.{clean})&select=*&order=created_at.desc"
         headers = {
             "apikey": cls.get_api_key(),
             "Authorization": f"Bearer {auth_token}"
@@ -469,7 +482,7 @@ class SupabaseService:
         if not cls.is_configured():
             return False
         auth_token = settings.supabase_service_role_key or cls.get_api_key()
-        url = f"{settings.supabase_url.rstrip('/')}/rest/v1/bs_conversions"
+        url = f"{cls.get_url()}/rest/v1/bs_conversions"
         payload = json.dumps(conv_data).encode("utf-8")
         headers = {
             "apikey": cls.get_api_key(),
@@ -498,7 +511,7 @@ class SupabaseService:
         if not cls.is_configured():
             return False
         auth_token = settings.supabase_service_role_key or cls.get_api_key()
-        url = f"{settings.supabase_url.rstrip('/')}/rest/v1/bs_audit_logs"
+        url = f"{cls.get_url()}/rest/v1/bs_audit_logs"
         log_entry = {
             "action": action,
             "actor_id": actor_id,
@@ -533,7 +546,7 @@ class SupabaseService:
         if not cls.is_configured():
             return False
         auth_token = settings.supabase_service_role_key or cls.get_api_key()
-        url = f"{settings.supabase_url.rstrip('/')}/rest/v1/bs_login_history"
+        url = f"{cls.get_url()}/rest/v1/bs_login_history"
         entry = {
             "user_id": user_id,
             "ip_address": ip_address,
@@ -561,7 +574,7 @@ class SupabaseService:
         if not cls.is_configured():
             return []
         auth_token = settings.supabase_service_role_key or cls.get_api_key()
-        url = f"{settings.supabase_url.rstrip('/')}/rest/v1/bs_profiles?select=*&order=created_at.desc"
+        url = f"{cls.get_url()}/rest/v1/bs_profiles?select=*&order=created_at.desc"
         headers = {
             "apikey": cls.get_api_key(),
             "Authorization": f"Bearer {auth_token}"
@@ -581,7 +594,7 @@ class SupabaseService:
         if not cls.is_configured():
             return False
         auth_token = settings.supabase_service_role_key or cls.get_api_key()
-        url = f"{settings.supabase_url.rstrip('/')}/rest/v1/bs_profiles?id=eq.{user_id}"
+        url = f"{cls.get_url()}/rest/v1/bs_profiles?id=eq.{user_id}"
         payload = json.dumps(update_data).encode("utf-8")
         headers = {
             "apikey": cls.get_api_key(),
@@ -604,9 +617,9 @@ class SupabaseService:
             return []
         auth_token = settings.supabase_service_role_key or cls.get_api_key()
         if user_id:
-            url = f"{settings.supabase_url.rstrip('/')}/rest/v1/bs_conversions?user_id=eq.{user_id}&select=*&order=created_at.desc"
+            url = f"{cls.get_url()}/rest/v1/bs_conversions?user_id=eq.{user_id}&select=*&order=created_at.desc"
         else:
-            url = f"{settings.supabase_url.rstrip('/')}/rest/v1/bs_conversions?select=*&order=created_at.desc"
+            url = f"{cls.get_url()}/rest/v1/bs_conversions?select=*&order=created_at.desc"
         headers = {
             "apikey": cls.get_api_key(),
             "Authorization": f"Bearer {auth_token}"
@@ -626,7 +639,7 @@ class SupabaseService:
         if not cls.is_configured():
             return []
         auth_token = settings.supabase_service_role_key or cls.get_api_key()
-        url = f"{settings.supabase_url.rstrip('/')}/rest/v1/bs_audit_logs?select=*&order=created_at.desc&limit=200"
+        url = f"{cls.get_url()}/rest/v1/bs_audit_logs?select=*&order=created_at.desc&limit=200"
         headers = {
             "apikey": cls.get_api_key(),
             "Authorization": f"Bearer {auth_token}"
