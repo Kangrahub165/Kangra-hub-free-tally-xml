@@ -23,9 +23,37 @@ class Settings(BaseSettings):
     supabase_url: str = ""
     supabase_anon_key: str = ""
     supabase_service_role_key: str = ""
+
+    def model_post_init(self, __context):
+        if not self.supabase_url:
+            self.supabase_url = os.getenv("NEXT_PUBLIC_SUPABASE_URL", "").strip()
+        if self.supabase_url:
+            self.supabase_url = self.supabase_url.strip().rstrip("/")
+
+        if not self.supabase_anon_key:
+            self.supabase_anon_key = os.getenv("NEXT_PUBLIC_SUPABASE_ANON_KEY", "").strip()
+        else:
+            self.supabase_anon_key = self.supabase_anon_key.strip()
+
+        if not self.supabase_service_role_key:
+            self.supabase_service_role_key = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "").strip()
+        else:
+            self.supabase_service_role_key = self.supabase_service_role_key.strip()
+
+        env_cors = os.getenv("CORS_ORIGINS", "").strip() or os.getenv("ALLOWED_ORIGINS", "").strip()
+        if env_cors:
+            if not self.cors_origins:
+                self.cors_origins = env_cors
+            else:
+                self.cors_origins = f"{self.cors_origins},{env_cors}"
+            if not self.allowed_origins:
+                self.allowed_origins = env_cors
+            else:
+                self.allowed_origins = f"{self.allowed_origins},{env_cors}"
     frontend_url: str = "http://localhost:3000"
     admin_email: str = "admin@tallyxml.in"
     admin_recovery_email: str = "kangrahub@gmail.com"
+    admin_password: str = ""
     
     # SMS / OTP credentials (Optional: Fast2SMS, Twilio, etc.)
     fast2sms_api_key: str = ""
@@ -60,6 +88,10 @@ class Settings(BaseSettings):
     payment_whatsapp_number: str = "+919805987622"
     payment_qr_path: str = "/buy-a-coffee/googlepay_qr.png"
 
+    # Razorpay Test Mode Configuration
+    razorpay_key_id: str = "rzp_test_Tkc2qtjGZURBIh"
+    razorpay_key_secret: str = "Je6SUgN4dVlRe1N9p15nQOqu"
+
     # Buy a coffee configuration (Admin only)
     buy_coffee_enabled: bool = True
     buy_coffee_upi_id: str = "9418250639@ybl"
@@ -67,6 +99,20 @@ class Settings(BaseSettings):
     buy_coffee_button_text: str = "Buy Me a Coffee ☕"
     buy_coffee_message: str = "Enjoying Kangra Hub Free Tally XML? Support the project with a cup of coffee."
     buy_coffee_qr_path: str = "/buy-a-coffee/googlepay_qr.png"
+
+    # CORS Configuration
+    allowed_origins: str = "https://kangrahubtallyxml.netlify.app,http://localhost:3000,http://127.0.0.1:3000"
+    cors_origins: str = ""
+
+    # Google Gemini AI Integration (PRD Item 3)
+    gemini_api_key: str = ""
+    gemini_model: str = "gemini-3.5-flash"
+    gemini_timeout_seconds: float = 45.0
+    gemini_enabled: bool = True
+
+    # Image upload configuration (PRD Item 4)
+    max_image_size_mb: int = 10
+    allowed_file_types: str = "pdf,jpg,jpeg"
 
     # Temp file retention (minutes)
     file_retention_minutes: int = 60

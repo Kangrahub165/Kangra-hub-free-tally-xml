@@ -235,3 +235,123 @@ def test_exact_21_page_reconciliation_breakdown():
         # Clean up test jobs
         IN_MEMORY_JOBS.pop(job1_id, None)
         IN_MEMORY_JOBS.pop(job2_id, None)
+
+
+def test_admin_login_success_preview_mode():
+    """Verify that legitimate administrator can log in and verify admin status."""
+    from unittest.mock import patch
+    old_url = settings.supabase_url
+    old_key = settings.supabase_anon_key
+    settings.supabase_url = "https://mock.supabase.co"
+    settings.supabase_anon_key = "mock-key"
+    try:
+        admin_auth_data = {
+            "access_token": "valid-admin-preview-token",
+            "user": {
+                "id": "admin-preview-id",
+                "email": "admin@tallyxml.in",
+                "user_metadata": {"role": "ADMIN", "full_name": "Admin TallyXML"}
+            }
+        }
+        with patch("app.core.supabase_service.SupabaseService.sign_in_with_password", return_value=admin_auth_data), \
+             patch("app.core.supabase_service.SupabaseService.query_profile", return_value={"role": "ADMIN", "is_active": True, "account_status": "ACTIVE"}), \
+             patch("app.core.supabase_service.SupabaseService.query_user_access", return_value={"unlimited": True}):
+            res = client.post("/api/system/admin-login", json={
+                "email": "admin@tallyxml.in",
+                "password": "validadminpassword"
+            })
+            assert res.status_code == 200
+            data = res.json()
+            assert data["is_admin"] is True
+            assert "token" in data
+            token = data["token"]
+
+            # Verify that the issued token authorizes admin endpoints
+            res_verify = client.get("/api/admin/verify", headers={"Authorization": f"Bearer {token}"})
+            assert res_verify.status_code == 200
+            verify_data = res_verify.json()
+            assert verify_data["is_admin"] is True
+            assert verify_data["user"]["role"] in ("ADMIN", "SUPER_ADMIN")
+    finally:
+        settings.supabase_url = old_url
+        settings.supabase_anon_key = old_key
+
+
+def test_admin_login_invalid_credentials_rejected():
+    """Verify that invalid admin credentials return 401 and clear message."""
+    from unittest.mock import patch
+    old_url = settings.supabase_url
+    old_key = settings.supabase_anon_key
+    settings.supabase_url = "https://mock.supabase.co"
+    settings.supabase_anon_key = "mock-key"
+    try:
+        with patch("app.core.supabase_service.SupabaseService.sign_in_with_password", side_effect=RuntimeError("Invalid login credentials")):
+            res = client.post("/api/system/admin-login", json={
+                "email": "admin@tallyxml.in",
+                "password": "wrong_password"
+            })
+            assert res.status_code == 401
+            assert "authentication failed" in res.json()["detail"].lower()
+    finally:
+        settings.supabase_url = old_url
+        settings.supabase_anon_key = old_key
+
+
+def test_admin_login_standard_user_blocked_locally():
+    """Verify that regular user attempting admin login is blocked with 403."""
+    from unittest.mock import patch
+    old_url = settings.supabase_url
+    old_key = settings.supabase_anon_key
+    settings.supabase_url = "https://mock.supabase.co"
+    settings.supabase_anon_key = "mock-key"
+    try:
+        user_auth_data = {
+            "access_token": "user-test-token",
+            "user": {
+                "id": "regular-user-id",
+                "email": "user@example.com",
+                "user_metadata": {"role": "USER", "full_name": "Regular User"}
+            }
+        }
+        with patch("app.core.supabase_service.SupabaseService.sign_in_with_password", return_value=user_auth_data), \
+             patch("app.core.supabase_service.SupabaseService.query_profile", return_value={"role": "USER", "is_active": True, "account_status": "ACTIVE"}):
+            res = client.post("/api/system/admin-login", json={
+                "email": "user@example.com",
+                "password": "password123"
+            })
+            assert res.status_code == 403
+            assert "not authorized to access the administrator portal" in res.json()["detail"].lower()
+    finally:
+        settings.supabase_url = old_url
+        settings.supabase_anon_key = old_key
+
+
+def test_admin_staging_jwt_verification():
+    """Verify that decoded staging JWT tokens with admin credentials grant admin status."""
+    import base64
+    import json
+    
+    # Header & Payload for admin
+    payload_admin = {
+        "sub": "test-admin-jwt-id",
+        "email": "admin@tallyxml.in",
+        "user_metadata": {"role": "ADMIN", "full_name": "Admin Token User"}
+    }
+    encoded_admin = base64.urlsafe_b64encode(json.dumps(payload_admin).encode("utf-8")).decode("utf-8").rstrip("=")
+    fake_admin_jwt = f"eyJhbGciOiJIUzI1NiJ9.{encoded_admin}.signature"
+
+    res_admin = client.get("/api/admin/verify", headers={"Authorization": f"Bearer {fake_admin_jwt}"})
+    assert res_admin.status_code == 200
+    assert res_admin.json()["is_admin"] is True
+
+    # Header & Payload for regular user
+    payload_user = {
+        "sub": "test-regular-jwt-id",
+        "email": "regular@example.com",
+        "user_metadata": {"role": "USER", "full_name": "Regular User"}
+    }
+    encoded_user = base64.urlsafe_b64encode(json.dumps(payload_user).encode("utf-8")).decode("utf-8").rstrip("=")
+    fake_user_jwt = f"eyJhbGciOiJIUzI1NiJ9.{encoded_user}.signature"
+
+    res_user = client.get("/api/admin/verify", headers={"Authorization": f"Bearer {fake_user_jwt}"})
+    assert res_user.status_code == 403

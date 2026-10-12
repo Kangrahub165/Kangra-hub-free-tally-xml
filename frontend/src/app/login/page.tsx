@@ -57,8 +57,10 @@ function LoginForm() {
   useEffect(() => {
     if (isExpired) {
       setInfoMessage('Your session has expired. Please log in again to continue.');
-    } else if (nextUrl && (nextUrl.includes('/convert') || nextUrl === '/convert')) {
-      setInfoMessage('Please log in or create a free account to continue.');
+    } else if (nextUrl && (nextUrl.includes('/plans') || nextUrl.includes('/pricing') || nextUrl.includes('/checkout'))) {
+      setInfoMessage('Please log in to your account to view subscription plans and pricing.');
+    } else if (nextUrl && (nextUrl.includes('/convert') || nextUrl.includes('/conversation') || nextUrl.includes('/conversion'))) {
+      setInfoMessage('Please log in or create a free account to access the conversion feature.');
     }
   }, [isExpired, nextUrl]);
 
@@ -94,6 +96,11 @@ function LoginForm() {
           throw err;
         }
 
+        // If service is unconfigured (503 Service Unavailable), surface diagnostic message directly
+        if (err.status === 503) {
+          throw err;
+        }
+
         // 2. Fallback: Check if administrator credentials were submitted on standard login
         try {
           const adminData = await adminLogin(cleanEmail, password);
@@ -103,7 +110,10 @@ function LoginForm() {
             window.location.href = dest;
             return;
           }
-        } catch {
+        } catch (adminErr: any) {
+          if (adminErr?.status === 503) {
+            throw adminErr;
+          }
           // Fall back to showing original login error
         }
 

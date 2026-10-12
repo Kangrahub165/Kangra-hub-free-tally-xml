@@ -16,9 +16,11 @@ def test_daily_free_limit_calculation():
     user = CurrentUser(id="test-user-limit", email="limit@test.com", role="USER", is_unlimited=False)
     
     # Clean test state
-    for k in list(_IN_MEMORY_DAILY_USAGE.keys()):
-        if k.startswith("test-user-limit:"):
-            del _IN_MEMORY_DAILY_USAGE[k]
+    from app.api.usage import get_kolkata_today
+    from app.core import db
+    today = get_kolkata_today()
+    db.reset_daily_usage(user.id, today)
+    _IN_MEMORY_DAILY_USAGE[f"{user.id}:{today}"] = 0
 
     usage = get_user_usage_data(user)
     assert usage.daily_limit == 50

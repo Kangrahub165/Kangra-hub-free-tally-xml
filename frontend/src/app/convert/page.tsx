@@ -64,6 +64,7 @@ import {
   ImportedGroup,
   getAuthToken,
   setAuthToken,
+  getUserRole,
   downloadFileBlob,
   getPaymentConfig,
   submitPaymentRequest,
@@ -71,7 +72,11 @@ import {
   getRecentActiveConversion,
   getMyPaymentRequests,
   PaymentConfig,
-  PaymentRequest
+  PaymentRequest,
+  getDailyQuota,
+  DailyQuotaInfo,
+  getJobPages,
+  JobPageInfo
 } from '@/lib/api';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
@@ -106,8 +111,10 @@ export default function ConvertPage() {
   const [userBankLedgers, setUserBankLedgers] = useState<ImportedLedger[]>([]);
   const [isLedgerModalOpen, setIsLedgerModalOpen] = useState(false);
   
-  // File & Encryption
-  const [file, setFile] = useState<File | null>(null);
+  // File & Encryption (Single PDF or Multi-JPG batch)
+  const [files, setFiles] = useState<File[]>([]);
+  const file = files[0] || null;
+  const setFile = (f: File | null) => setFiles(f ? [f] : []);
   const [password, setPassword] = useState('');
   const [showPasswordModal, setShowPasswordModal] = useState(false);
   const [modalPasswordError, setModalPasswordError] = useState('');
@@ -130,7 +137,7 @@ export default function ConvertPage() {
   
   // Search & Filter within Review Table
   const [txSearch, setTxSearch] = useState('');
-  const [filterTab, setFilterTab] = useState<'ALL' | 'SUSPENSE' | 'MAPPED' | 'PAYMENT' | 'RECEIPT' | 'CONTRA' | 'WARNING' | 'ERROR' | 'DUPLICATE'>('ALL');
+  const [filterTab, setFilterTab] = useState<'ALL' | 'SUSPENSE' | 'MAPPED' | 'REVERSE' | 'PAYMENT' | 'RECEIPT' | 'CONTRA' | 'WARNING' | 'ERROR' | 'DUPLICATE'>('ALL');
   
   // Multi-row Selection & Bulk Actions Bar
   const [selectedRowIndices, setSelectedRowIndices] = useState<Set<number>>(new Set());
@@ -168,6 +175,7 @@ export default function ConvertPage() {
   const [pendingPayments, setPendingPayments] = useState<PaymentRequest[]>([]);
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved'>('idle');
   const [showNewStatementModal, setShowNewStatementModal] = useState(false);
+  const [dailyQuota, setDailyQuota] = useState<DailyQuotaInfo | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -178,6 +186,7 @@ export default function ConvertPage() {
       return;
     }
     getUserUsage().then(setUsage).catch(() => {});
+    getDailyQuota().then(setDailyQuota).catch(() => {});
     getSupportedBanks().then(setSupportedBanks).catch(() => {});
     getPaymentConfig().then(setPaymentConfig).catch(() => {});
     getRecentActiveConversion().then((recent) => {
@@ -223,36 +232,125 @@ export default function ConvertPage() {
     e.preventDefault();
     e.stopPropagation();
     setDragActive(false);
-    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
-      handleFileSelected(e.dataTransfer.files[0]);
+    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+      handleFilesSelected(Array.from(e.dataTransfer.files));
     }
   };
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files[0]) {
-      handleFileSelected(e.target.files[0]);
+    if (e.target.files && e.target.files.length > 0) {
+      handleFilesSelected(Array.from(e.target.files));
     }
   };
 
-  const handleFileSelected = (selectedFile: File) => {
-    if (!selectedFile.name.toLowerCase().endsWith('.pdf')) {
-      setErrorMsg('Only bank-generated PDF statements are supported. Please upload a PDF file.');
+  const handleFilesSelected = (selectedFiles: File[]) => {
+    if (!selectedFiles || selectedFiles.length === 0) return;
+
+    const isEffectiveAdmin = Boolean(isAdmin || getUserRole() === 'ADMIN' || usage?.is_unlimited);
+    const maxAllowedJpg = isEffectiveAdmin ? 50 : 10;
+    const roleName = isEffectiveAdmin ? 'Administrators' : 'Normal users';
+
+    const pdfFiles: File[] = [];
+    const imageFiles: File[] = [];
+    const invalidFiles: string[] = [];
+
+    for (const f of selectedFiles) {
+      const fileNameLower = f.name.toLowerCase();
+      const isPdf = fileNameLower.endsWith('.pdf');
+      const isImage = fileNameLower.endsWith('.jpg') || fileNameLower.endsWith('.jpeg');
+      if (isPdf) {
+        pdfFiles.push(f);
+      } else if (isImage) {
+        imageFiles.push(f);
+      } else {
+        invalidFiles.push(f.name);
+      }
+    }
+
+    if (invalidFiles.length > 0) {
+      setErrorMsg(`Unsupported file type (${invalidFiles.join(', ')}). Please upload a PDF, JPG, or JPEG bank statement.`);
+      setFiles([]);
       return;
     }
-    setFile(selectedFile);
-    setErrorMsg('');
+
+    if (pdfFiles.length > 0 && imageFiles.length > 0) {
+      setErrorMsg('Mixed file types are not supported. Please upload either a single PDF document or a batch of JPG/JPEG images.');
+      setFiles([]);
+      return;
+    }
+
+    if (pdfFiles.length > 1) {
+      setErrorMsg(`Multiple PDF upload is not supported. Please upload one PDF bank statement at a time, or up to ${maxAllowedJpg} JPG/JPEG images in a batch.`);
+      setFiles([]);
+      return;
+    }
+
+    if (pdfFiles.length === 1) {
+      const targetPdf = pdfFiles[0];
+      if (targetPdf.size > 25 * 1024 * 1024) {
+        setErrorMsg('File too large. PDF statements must be under 25 MB.');
+        setFiles([]);
+        return;
+      }
+      setFiles([targetPdf]);
+      setErrorMsg('');
+      return;
+    }
+
+    if (imageFiles.length > 0) {
+      if (imageFiles.length > maxAllowedJpg) {
+        setErrorMsg(
+          `Upload limit exceeded: ${roleName} can upload up to ${maxAllowedJpg} JPG/JPEG images per batch. ` +
+          `You selected ${imageFiles.length} images. Please reduce your selection to ${maxAllowedJpg} images or fewer.`
+        );
+        setFiles([]);
+        return;
+      }
+
+      const oversizedImages = imageFiles.filter((img) => img.size > 10 * 1024 * 1024);
+      if (oversizedImages.length > 0) {
+        setErrorMsg(
+          `File too large: ${oversizedImages.map((f) => f.name).join(', ')}. Image statements (JPG/JPEG) must be under 10 MB each.`
+        );
+        setFiles([]);
+        return;
+      }
+
+      setFiles(imageFiles);
+      setErrorMsg('');
+      return;
+    }
   };
 
   const startConversion = async (pdfPassword?: string) => {
-    if (!file) return;
+    if (files.length === 0) return;
     setErrorMsg('');
+    // Strict Job Isolation (PRD Item 3): Clear previous job state completely
+    setTransactions([]);
+    setJob(null);
+    setXmlResult(null);
+    setExcelResult(null);
+    setActiveRecentJob(null);
     setCurrentStep(2);
-    setProcessingStep('Analyzing PDF structure & checking page quota...');
+    const isImage = files.some(f => /\.(jpe?g)$/i.test(f.name));
+    setProcessingStep(
+      isImage
+        ? (files.length > 1
+            ? `Analyzing ${files.length} statement photos with Gemini AI vision...`
+            : 'Analyzing statement with Gemini AI vision...')
+        : 'Analyzing PDF structure & checking page quota...'
+    );
 
     try {
       setTimeout(() => {
         setCurrentStep(3);
-        setProcessingStep('Detecting bank signature & column boundaries...');
+        setProcessingStep(
+          isImage
+            ? (files.length > 1
+                ? `Extracting transactions across ${files.length} images & verifying running balance math...`
+                : 'Extracting transactions & verifying running balance math...')
+            : 'Detecting bank signature & column boundaries...'
+        );
       }, 700);
 
       setTimeout(() => {
@@ -260,7 +358,7 @@ export default function ConvertPage() {
       }, 1400);
 
       const jobData = await uploadStatementPdf(
-        file, 
+        files.length > 1 ? files : files[0], 
         pdfPassword || password, 
         bankOverride,
         bankLedgerName,
@@ -295,6 +393,7 @@ export default function ConvertPage() {
       }
 
       getUserUsage().then(setUsage).catch(() => {});
+      getDailyQuota().then(setDailyQuota).catch(() => {});
     } catch (err: any) {
       setCurrentStep(1);
       const isPasswordIssue =
@@ -810,6 +909,9 @@ export default function ConvertPage() {
     t => t.ledger_name === 'Suspense' || t.mapping_status === 'Suspense' || !t.ledger_name
   ).length;
   const mappedCount = transactions.length - suspenseCount;
+  const reverseCount = transactions.filter(
+    t => Boolean(t.is_reverse_entry) || t.ledger_name === 'Reverse Entries' || Boolean(t.linked_reversal_ref)
+  ).length;
   const errorCount = transactions.filter(t => t.validation_status === 'ERROR').length;
   const warningCount = transactions.filter(t => t.validation_status === 'WARNING').length;
   const duplicateCount = transactions.filter(t => Boolean(t.is_duplicate_suspect)).length;
@@ -830,6 +932,9 @@ export default function ConvertPage() {
 
     if (filterTab === 'SUSPENSE') {
       return t.ledger_name === 'Suspense' || t.mapping_status === 'Suspense' || !t.ledger_name;
+    }
+    if (filterTab === 'REVERSE') {
+      return Boolean(t.is_reverse_entry) || t.ledger_name === 'Reverse Entries' || Boolean(t.linked_reversal_ref);
     }
     if (filterTab === 'MAPPED') {
       return t.ledger_name !== 'Suspense' && t.mapping_status !== 'Suspense' && Boolean(t.ledger_name);
@@ -884,7 +989,7 @@ export default function ConvertPage() {
               </Badge>
             </div>
             <p className="text-xs text-navy-200">
-              Upload bank statement PDF → Verify transactions & running balance math → Export verified Tally XML
+              Upload bank statement (PDF, JPG, JPEG) → Verify transactions & running balance math → Export verified Tally XML
             </p>
           </div>
 
@@ -971,6 +1076,39 @@ export default function ConvertPage() {
         {/* STAGE 1: UPLOAD ZONE */}
         {currentStep === 1 && (
           <div className="max-w-3xl mx-auto space-y-6">
+
+            {/* Daily Free Quota Bar (PRD Section 4 & 5) */}
+            <Card className="p-4 border-slate-200 bg-white shadow-xs">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div className="flex items-center gap-3">
+                  <div className="w-9 h-9 rounded-xl bg-brand-50 text-brand-600 flex items-center justify-center font-bold">
+                    <Sparkles className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <h4 className="text-xs font-bold text-slate-800 uppercase tracking-wider">
+                      Daily Free Quota
+                    </h4>
+                    <p className="text-[11px] text-slate-500">
+                      Independent counters for PDF and Images. Resets daily at {dailyQuota?.reset_time_ist || '12:00 AM IST'}.
+                    </p>
+                  </div>
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <div className="px-3 py-1.5 rounded-xl bg-slate-100 border border-slate-200 text-xs">
+                    <span className="text-slate-500 font-medium">PDF Pages: </span>
+                    <strong className="text-slate-800">
+                      {dailyQuota?.is_unlimited ? 'Unlimited' : `${dailyQuota?.pdf_pages?.remaining ?? 50} / ${dailyQuota?.pdf_pages?.limit ?? 50} remaining`}
+                    </strong>
+                  </div>
+                  <div className="px-3 py-1.5 rounded-xl bg-slate-100 border border-slate-200 text-xs">
+                    <span className="text-slate-500 font-medium">Images: </span>
+                    <strong className="text-slate-800">
+                      {dailyQuota?.is_unlimited ? 'Unlimited' : `${dailyQuota?.images?.remaining ?? 5} / ${dailyQuota?.images?.limit ?? 5} remaining`}
+                    </strong>
+                  </div>
+                </div>
+              </div>
+            </Card>
             
             {/* Continue Previous Conversion Recovery Card (PRD #34) */}
             {activeRecentJob && (
@@ -1136,7 +1274,8 @@ export default function ConvertPage() {
               <input
                 ref={fileInputRef}
                 type="file"
-                accept="application/pdf"
+                multiple
+                accept=".pdf,.jpg,.jpeg,application/pdf,image/jpeg"
                 className="hidden"
                 onChange={handleFileChange}
               />
@@ -1148,22 +1287,37 @@ export default function ConvertPage() {
                 <UploadCloud className={`w-10 h-10 ${dragActive ? 'animate-bounce' : ''}`} />
               </div>
               <h2 className="text-xl font-bold text-slate-900 mb-2 relative z-10 tracking-tight">
-                {file ? (
+                {files.length > 1 ? (
+                  <span className="text-brand-700 flex items-center justify-center gap-2">
+                    <Layers className="w-5 h-5 text-brand-600" />
+                    <span>Batch: {files.length} JPG Images Selected</span>
+                  </span>
+                ) : file ? (
                   <span className="text-brand-700 flex items-center justify-center gap-2">
                     <FileText className="w-5 h-5" /> {file.name}
                   </span>
-                ) : 'Upload Bank Statement PDF'}
+                ) : 'Upload Bank Statement (PDF, JPG, JPEG)'}
               </h2>
               <p className="text-xs text-slate-500 max-w-sm mx-auto mb-6 leading-relaxed relative z-10">
-                Drag and drop your digital statement PDF here, or <span className="text-brand-600 font-semibold group-hover:underline">browse files</span> from your device
+                {files.length > 1 ? (
+                  <span>
+                    Ready to convert {files.length} images as a single multi-page statement. Click below to start conversion, or click here to choose different files.
+                  </span>
+                ) : (
+                  <>
+                    Drag and drop your statement PDF, JPG, or JPEG photo here, or <span className="text-brand-600 font-semibold group-hover:underline">browse files</span> from your device
+                  </>
+                )}
               </p>
               
-              <div className="inline-flex items-center gap-3 px-4 py-2 rounded-xl bg-slate-100/80 text-[11px] font-bold text-slate-600 relative z-10 border border-slate-200 shadow-xs">
+              <div className="inline-flex flex-wrap items-center justify-center gap-3 px-4 py-2 rounded-xl bg-slate-100/80 text-[11px] font-bold text-slate-600 relative z-10 border border-slate-200 shadow-xs">
                 <span className="flex items-center gap-1.5"><Building2 className="w-3.5 h-3.5 text-slate-400" /> 38+ Banks</span>
                 <span className="w-1 h-1 rounded-full bg-slate-300" />
-                <span className="flex items-center gap-1.5"><Layers className="w-3.5 h-3.5 text-slate-400" /> Up to 25 MB</span>
+                <span className="flex items-center gap-1.5"><Layers className="w-3.5 h-3.5 text-slate-400" /> PDF / Multi-JPG</span>
                 <span className="w-1 h-1 rounded-full bg-slate-300" />
-                <span className="flex items-center gap-1.5"><FileText className="w-3.5 h-3.5 text-slate-400" /> Max 200 Pages</span>
+                <span className="flex items-center gap-1.5"><Sparkles className="w-3.5 h-3.5 text-slate-400" /> Gemini AI Powered</span>
+                <span className="w-1 h-1 rounded-full bg-slate-300" />
+                <span className="text-brand-700 font-medium">Batch Limit: {isAdmin || getUserRole() === 'ADMIN' ? '50 Images (Admin)' : '10 Images (User)'}</span>
               </div>
             </div>
 
@@ -1229,15 +1383,60 @@ export default function ConvertPage() {
               </select>
             </Card>
 
-            {file && (
-              <div className="text-center pt-2">
+            {/* Pre-upload Quota Warning Banner (PRD Section 4) */}
+            {files.length > 0 && dailyQuota && !dailyQuota.is_unlimited && (
+              (() => {
+                const isImg = files.some(f => /\.(jpe?g)$/i.test(f.name));
+                if (isImg) {
+                  const remImg = dailyQuota.images?.remaining ?? 5;
+                  if (remImg <= 0) {
+                    return (
+                      <div className="p-4 rounded-2xl bg-amber-50 border border-amber-200 text-amber-900 text-xs font-medium space-y-1">
+                        <p className="font-bold text-amber-800">Free Daily Image Limit Exhausted</p>
+                        <p>You have reached your free daily limit for today (5 images). Your limit will reset at 12:00 AM IST.</p>
+                      </div>
+                    );
+                  } else if (files.length > remImg) {
+                    return (
+                      <div className="p-4 rounded-2xl bg-amber-50 border border-amber-200 text-amber-900 text-xs font-medium space-y-1">
+                        <p className="font-bold text-amber-800">Upload Exceeds Remaining Image Quota</p>
+                        <p>Your free daily limit is 5 images. You selected {files.length} images. We will accept the first {remImg} images for processing. The remaining {files.length - remImg} images will not be processed under the free quota.</p>
+                      </div>
+                    );
+                  }
+                } else {
+                  const remPdf = dailyQuota.pdf_pages?.remaining ?? 50;
+                  if (remPdf <= 0) {
+                    return (
+                      <div className="p-4 rounded-2xl bg-amber-50 border border-amber-200 text-amber-900 text-xs font-medium space-y-1">
+                        <p className="font-bold text-amber-800">Free Daily PDF Limit Exhausted</p>
+                        <p>You have reached your free daily limit for today (50 PDF pages). Your limit will reset at 12:00 AM IST.</p>
+                      </div>
+                    );
+                  }
+                }
+                return null;
+              })()
+            )}
+
+            {files.length > 0 && (
+              <div className="text-center pt-2 flex flex-col sm:flex-row items-center justify-center gap-3">
                 <Button
                   variant="primary"
                   size="lg"
                   onClick={() => startConversion()}
                   iconRight={<ArrowRight className="w-4 h-4" />}
                 >
-                  Start Bank Statement Conversion
+                  {files.length > 1
+                    ? `Start Batch Conversion (${files.length} Images)`
+                    : 'Start Bank Statement Conversion'}
+                </Button>
+                <Button
+                  variant="outline"
+                  size="md"
+                  onClick={() => setFiles([])}
+                >
+                  Clear Selection
                 </Button>
               </div>
             )}
@@ -1346,6 +1545,36 @@ export default function ConvertPage() {
         {/* STAGES 4 & 5: REVIEW TRANSACTIONS & LEDGER MAPPING */}
         {(currentStep === 4 || currentStep === 5) && job && (
           <div className="space-y-6">
+
+            {/* Post-Upload Outcome Breakdown (PRD Section 4 & 6) */}
+            <Card className="p-4 border-slate-200 bg-slate-50/50 shadow-xs">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="font-bold text-slate-800">Processing Outcome:</span>
+                  <span className="px-2 py-0.5 rounded-md bg-emerald-100 text-emerald-800 font-bold">
+                    Accepted: {job.accepted_pages ?? job.pages_processed ?? 0}
+                  </span>
+                  <span className="px-2 py-0.5 rounded-md bg-blue-100 text-blue-800 font-bold">
+                    Extracted: {job.transaction_count} Txns
+                  </span>
+                  {job.unprocessed_pages && job.unprocessed_pages > 0 ? (
+                    <span className="px-2 py-0.5 rounded-md bg-amber-100 text-amber-800 font-bold">
+                      Not Processed (Quota): {job.unprocessed_pages}
+                    </span>
+                  ) : null}
+                  {job.warning_count && job.warning_count > 0 ? (
+                    <span className="px-2 py-0.5 rounded-md bg-amber-100 text-amber-700 font-medium">
+                      Warnings: {job.warning_count}
+                    </span>
+                  ) : null}
+                </div>
+                {job.quota_message && (
+                  <span className="text-[11px] text-slate-600 font-medium italic">
+                    {job.quota_message}
+                  </span>
+                )}
+              </div>
+            </Card>
             
             {/* Quota Exhausted Banner */}
             {job.status === 'QUOTA_EXHAUSTED' && (
@@ -1977,6 +2206,7 @@ export default function ConvertPage() {
                   { key: 'SUSPENSE', label: `Requires Review (${suspenseCount})`, alert: suspenseCount > 0 },
                   ...(errorCount > 0 ? [{ key: 'ERROR', label: `Errors (${errorCount})`, isError: true }] : []),
                   ...(warningCount > 0 ? [{ key: 'WARNING', label: `Warnings (${warningCount})`, isWarn: true }] : []),
+                  ...(reverseCount > 0 ? [{ key: 'REVERSE', label: `Reverse Entries (${reverseCount})`, isRev: true }] : []),
                   { key: 'MAPPED', label: `Mapped (${mappedCount})` },
                   { key: 'PAYMENT', label: 'Payment' },
                   { key: 'RECEIPT', label: 'Receipt' },
@@ -1994,6 +2224,8 @@ export default function ConvertPage() {
                           ? 'bg-amber-600 text-white shadow-xs'
                           : tab.alert
                           ? 'bg-amber-600 text-white shadow-xs'
+                          : tab.isRev
+                          ? 'bg-indigo-600 text-white shadow-xs'
                           : tab.isDup
                           ? 'bg-purple-700 text-white shadow-xs'
                           : 'bg-slate-900 text-white shadow-xs'
@@ -2003,6 +2235,8 @@ export default function ConvertPage() {
                         ? 'bg-amber-50 text-amber-800 border border-amber-300 hover:bg-amber-100'
                         : tab.alert
                         ? 'bg-amber-50 text-amber-800 border border-amber-200 hover:bg-amber-100'
+                        : tab.isRev
+                        ? 'bg-indigo-50 text-indigo-800 border border-indigo-200 hover:bg-indigo-100'
                         : tab.isDup
                         ? 'bg-purple-50 text-purple-800 border border-purple-200 hover:bg-purple-100'
                         : 'bg-slate-100/70 text-slate-700 hover:bg-slate-200/80 border border-slate-200/60'
@@ -2218,6 +2452,22 @@ export default function ConvertPage() {
                                 {tx.party_name && (
                                   <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-brand-800 bg-brand-50 px-2 py-0.2 rounded border border-brand-200">
                                     Party: {tx.party_name}
+                                  </span>
+                                )}
+                                {tx.is_reverse_entry && (
+                                  <span
+                                    className="inline-flex items-center gap-1 text-[10px] font-bold text-indigo-800 bg-indigo-100 px-1.5 py-0.2 rounded border border-indigo-200"
+                                    title={tx.reversal_reason ? `Reversal: ${tx.reversal_reason}` : 'Reverse Entry Pair (Net: ₹0.00)'}
+                                  >
+                                    ↩ Reverse Entry {tx.reversal_pair_id ? `(${tx.reversal_pair_id})` : ''}
+                                  </span>
+                                )}
+                                {tx.linked_reversal_ref && (
+                                  <span
+                                    className="inline-flex items-center gap-1 text-[10px] font-semibold text-teal-800 bg-teal-100 px-1.5 py-0.2 rounded border border-teal-200"
+                                    title={`Return charge linked to reversal ref ${tx.linked_reversal_ref}`}
+                                  >
+                                    Linked to Ref {tx.linked_reversal_ref}
                                   </span>
                                 )}
                                 {tx.is_cash_transaction && (
@@ -2562,7 +2812,8 @@ export default function ConvertPage() {
                 size="lg"
                 onClick={() => {
                   if (excelResult) {
-                    downloadFileBlob(excelResult.download_url, excelResult.filename);
+                    downloadFileBlob(excelResult.download_url, excelResult.filename)
+                      .catch((err) => setErrorMsg(err.message || 'Failed to download Excel file.'));
                   } else {
                     handleDownloadExcel();
                   }
@@ -2579,7 +2830,10 @@ export default function ConvertPage() {
                 <Button
                   variant="success"
                   size="lg"
-                  onClick={() => downloadFileBlob(xmlResult.download_url, xmlResult.filename)}
+                  onClick={() => {
+                    downloadFileBlob(xmlResult.download_url, xmlResult.filename)
+                      .catch((err) => setErrorMsg(err.message || 'Failed to download Tally XML file.'));
+                  }}
                   className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-3.5 shadow-md"
                   icon={<Download className="w-4 h-4" />}
                 >

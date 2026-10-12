@@ -14,9 +14,11 @@ export function Header() {
   const pathname = usePathname();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [settings, setSettings] = useState<PublicSettings | null>(null);
+  const [mounted, setMounted] = useState(false);
   const { isAuthenticated, isAdmin, logout } = useAuth();
 
   useEffect(() => {
+    setMounted(true);
     getPublicSettings().then(setSettings).catch(() => {});
   }, []);
 
@@ -34,6 +36,7 @@ export function Header() {
 
   const navLinks = [
     { label: 'How It Works', href: '/how-it-works' },
+    { label: 'Plans', href: '/plans' },
     { label: 'Unlock PDF', href: '/unlock-pdf' },
     { label: 'Supported Banks', href: '/supported-banks' },
     { label: 'FAQ', href: '/faq' },
@@ -104,7 +107,7 @@ export function Header() {
 
           {/* User / Authentication CTAs */}
           <div className="hidden md:flex items-center gap-2.5">
-            {isAuthenticated ? (
+            {mounted && isAuthenticated ? (
               <div className="flex items-center gap-2">
                 {isAdmin ? (
                   <Link
@@ -123,6 +126,12 @@ export function Header() {
                     Dashboard
                   </Link>
                 )}
+                <Link
+                  href="/plans"
+                  className="inline-flex items-center justify-center font-semibold transition-all duration-200 rounded-xl focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-1 select-none px-3 py-1.5 text-xs gap-1.5 bg-white text-slate-700 hover:bg-slate-50 hover:text-slate-900 border border-slate-200 shadow-xs hover:border-slate-300 active:scale-[0.97]"
+                >
+                  View Plans
+                </Link>
                 <Link
                   href="/convert"
                   className="inline-flex items-center justify-center font-semibold transition-all duration-200 rounded-xl focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-1 select-none px-3 py-1.5 text-xs gap-1.5 bg-brand-600 text-white hover:bg-brand-500 hover:text-white shadow-sm border border-brand-700/20 hover:shadow-glow-brand active:scale-[0.97]"
@@ -148,10 +157,16 @@ export function Header() {
                   Log In
                 </Link>
                 <Link
-                  href="/convert"
+                  href="/login?redirect=/plans"
+                  className="inline-flex items-center justify-center font-semibold transition-all duration-200 rounded-xl focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-1 select-none px-3 py-1.5 text-xs gap-1.5 bg-white text-brand-700 hover:bg-brand-50 hover:text-brand-800 border border-brand-200 shadow-xs active:scale-[0.97]"
+                >
+                  View Plans
+                </Link>
+                <Link
+                  href="/login?redirect=/convert"
                   className="inline-flex items-center justify-center font-semibold transition-all duration-200 rounded-xl focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-1 select-none px-3 py-1.5 text-xs gap-1.5 bg-brand-600 text-white hover:bg-brand-500 hover:text-white shadow-sm border border-brand-700/20 hover:shadow-glow-brand active:scale-[0.97]"
                 >
-                  Convert Statement
+                  Conversation
                   <ArrowRight className="w-3.5 h-3.5" />
                 </Link>
               </div>
@@ -208,7 +223,7 @@ export function Header() {
           </div>
 
           <div className="pt-3 border-t border-slate-100 flex flex-col gap-2">
-            {isAuthenticated ? (
+            {mounted && isAuthenticated ? (
               <>
                 <Link
                   href="/convert"
@@ -217,6 +232,13 @@ export function Header() {
                 >
                   Convert Statement
                   <ArrowRight className="w-4 h-4" />
+                </Link>
+                <Link
+                  href="/plans"
+                  onClick={() => setMobileMenuOpen(false)}
+                  className="w-full inline-flex items-center justify-center font-semibold transition-all duration-200 rounded-xl select-none px-4 py-2 text-xs gap-1.5 bg-slate-50 text-slate-700 hover:bg-slate-100 border border-slate-200 shadow-xs"
+                >
+                  View Plans
                 </Link>
                 <div className="grid grid-cols-2 gap-2">
                   <Link
@@ -240,12 +262,19 @@ export function Header() {
             ) : (
               <>
                 <Link
-                  href="/convert"
+                  href="/login?redirect=/convert"
                   onClick={() => setMobileMenuOpen(false)}
                   className="w-full inline-flex items-center justify-center font-semibold transition-all duration-200 rounded-xl select-none px-4 py-2.5 text-sm gap-2 bg-brand-600 text-white hover:bg-brand-500 hover:text-white shadow-sm border border-brand-700/20 hover:shadow-glow-brand"
                 >
-                  Convert Statement
+                  Conversation
                   <ArrowRight className="w-4 h-4" />
+                </Link>
+                <Link
+                  href="/login?redirect=/plans"
+                  onClick={() => setMobileMenuOpen(false)}
+                  className="w-full inline-flex items-center justify-center font-semibold transition-all duration-200 rounded-xl select-none px-4 py-2 text-xs gap-1.5 bg-white text-brand-700 hover:bg-brand-50 border border-brand-200 shadow-xs"
+                >
+                  View Plans
                 </Link>
                 <div className="grid grid-cols-2 gap-2">
                   <Link

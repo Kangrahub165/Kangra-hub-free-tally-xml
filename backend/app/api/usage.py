@@ -111,6 +111,11 @@ class UserUsageResponse(BaseModel):
     conversion_count: int = 0
     completed_pages_today: int = 0
     needs_review_pages_today: int = 0
+    subscription_plan_id: Optional[str] = None
+    subscription_plan_name: Optional[str] = None
+    subscription_bill_limit: Optional[int] = None
+    bills_converted_this_cycle: int = 0
+    bills_remaining_this_cycle: Optional[int] = None
 
 def get_user_usage_data(user: CurrentUser) -> UserUsageResponse:
     today = get_kolkata_today()
@@ -159,9 +164,15 @@ def get_user_usage_data(user: CurrentUser) -> UserUsageResponse:
                     jobs_today_pages += p_count
 
     # Check persistent SQLite daily usage
-    db_recorded_pages = db.get_daily_usage(user.id, today)
+    db_recorded_pages = max(
+        db.get_daily_usage(user.id, today),
+        db.get_daily_quota_used(user.id, today, "PDF_PAGE")
+    )
     if db_recorded_pages == 0 and getattr(user, "email", None):
-        db_recorded_pages = db.get_daily_usage(user.email, today)
+        db_recorded_pages = max(
+            db.get_daily_usage(user.email, today),
+            db.get_daily_quota_used(user.email, today, "PDF_PAGE")
+        )
 
     mem_recorded_pages = _IN_MEMORY_DAILY_USAGE.get(key, 0)
     recorded_pages = max(db_recorded_pages, mem_recorded_pages)
@@ -187,8 +198,32 @@ def get_user_usage_data(user: CurrentUser) -> UserUsageResponse:
     if custom_val is None:
         custom_val = USER_CUSTOM_QUOTAS.get(user.id) or (USER_CUSTOM_QUOTAS.get(user.email) if user.email else None)
 
+    # Resolve subscription details
+    sub_plan_id = user.subscription_plan_id
+    sub_plan_name = user.subscription_plan_name
+    sub_bill_limit = user.subscription_bill_limit
+    bills_converted = 0
+    bills_remaining = None
+
+    try:
+        mem = db.get_active_staff_membership(user.id, user.email)
+        if mem:
+            sub_plan_id = mem.get("plan_id") or sub_plan_id
+            sub_plan_name = mem.get("plan_name") or sub_plan_name
+            sub_bill_limit = mem.get("bills_limit") if mem.get("bills_limit") is not None else sub_bill_limit
+            started_at = mem.get("membership_started_at")
+            bills_converted = db.get_user_bills_converted_since(user.id, started_at)
+            if sub_bill_limit == -1 or user.is_unlimited:
+                bills_remaining = None
+            else:
+                bills_remaining = max(0, (sub_bill_limit or 0) - bills_converted)
+    except Exception:
+        pass
+
     if user.is_admin or user.role in ("ADMIN", "SUPER_ADMIN"):
         status_label = "Admin Unlimited"
+    elif sub_plan_name:
+        status_label = f"{sub_plan_name} Active"
     elif user.is_unlimited:
         status_label = "Unlimited Approved"
     elif mode == "CUSTOM":
@@ -219,7 +254,12 @@ def get_user_usage_data(user: CurrentUser) -> UserUsageResponse:
         reset_at_ist="12:00 AM IST",
         conversion_count=conversions_today_count,
         completed_pages_today=completed_pages,
-        needs_review_pages_today=needs_review_pages
+        needs_review_pages_today=needs_review_pages,
+        subscription_plan_id=sub_plan_id,
+        subscription_plan_name=sub_plan_name,
+        subscription_bill_limit=sub_bill_limit,
+        bills_converted_this_cycle=bills_converted,
+        bills_remaining_this_cycle=bills_remaining
     )
 
 def record_user_page_usage(user: CurrentUser, pages: int):

@@ -387,7 +387,7 @@ async def user_login(payload: UserLoginRequest, request: Request):
             }
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Authentication service is temporarily unavailable."
+            detail="Supabase authentication service is not configured on the server. Please configure SUPABASE_URL and SUPABASE_ANON_KEY in the backend environment variables."
         )
 
     try:

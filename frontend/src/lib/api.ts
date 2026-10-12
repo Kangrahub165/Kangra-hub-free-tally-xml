@@ -100,6 +100,13 @@ export interface TransactionItem {
   validation_notes?: string;
   is_duplicate_suspect?: boolean;
   duplicate_reason?: string;
+  is_reverse_entry?: boolean;
+  reversal_pair_id?: string;
+  reversal_leg?: 'ORIGINAL' | 'REVERSAL' | 'UNPAIRED' | string;
+  reversal_reason?: string;
+  paired_row_index?: number;
+  linked_charge_row_index?: number;
+  linked_reversal_ref?: string;
   source_page?: number;
   source_lines?: string[];
 }
@@ -135,6 +142,9 @@ export interface ConversionJobSummary {
   suspense_count?: number;
   mapped_count?: number;
   duplicate_count?: number;
+  reverse_entries_count?: number;
+  reverse_pairs_count?: number;
+  reverse_unmatched_count?: number;
   warning_count?: number;
   error_count?: number;
   ready_for_export?: boolean;
@@ -161,6 +171,50 @@ export interface ConversionJobSummary {
   override_warning?: string;
   candidates?: any[];
   transactions?: TransactionItem[];
+  quota_type?: string;
+  accepted_pages?: number;
+  unprocessed_pages?: number;
+  processed_pages?: number;
+  failed_pages?: number;
+  warning_pages?: number;
+  quota_message?: string;
+  job_pages?: JobPageInfo[];
+}
+
+export interface QuotaCounter {
+  limit: number | null;
+  used: number;
+  remaining: number | null;
+}
+
+export interface DailyQuotaInfo {
+  pdf_pages: QuotaCounter;
+  images: QuotaCounter;
+  reset_time_ist: string;
+  date_ist: string;
+  is_admin: boolean;
+  is_unlimited: boolean;
+  is_paid: boolean;
+}
+
+export interface JobPageInfo {
+  id: string;
+  job_id: string;
+  file_id?: string;
+  page_number: number;
+  status: string;
+  error_reason?: string;
+  transaction_count: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export async function getDailyQuota(): Promise<DailyQuotaInfo> {
+  return apiFetch<DailyQuotaInfo>('/quota');
+}
+
+export async function getJobPages(jobId: string): Promise<{ job_id: string; total_pages: number; pages: JobPageInfo[] }> {
+  return apiFetch(`/conversions/${encodeURIComponent(jobId)}/pages`);
 }
 
 export interface ImportedGroup {
@@ -660,27 +714,65 @@ export async function getUserUsage(): Promise<UsageInfo> {
 }
 
 export async function uploadStatementPdf(
-  file: File,
+  fileOrFiles: File | File[],
   password?: string,
   bankOverride?: string,
   bankLedgerName?: string,
   cashLedgerName?: string
 ): Promise<ConversionJobSummary> {
   const formData = new FormData();
-  formData.append('file', file);
+  if (Array.isArray(fileOrFiles)) {
+    fileOrFiles.forEach((f) => {
+      formData.append('files', f);
+    });
+    if (fileOrFiles.length > 0) {
+      formData.append('file', fileOrFiles[0]);
+    }
+  } else {
+    formData.append('file', fileOrFiles);
+  }
   if (password) formData.append('password', password);
   if (bankOverride) formData.append('bank_override', bankOverride);
   if (bankLedgerName) formData.append('bank_ledger_name', bankLedgerName);
   if (cashLedgerName) formData.append('cash_ledger_name', cashLedgerName);
 
   const token = getAuthToken();
-  const res = await fetch(`${API_BASE}/conversions/upload`, {
+  const headers: Record<string, string> = {};
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
+
+  let res = await fetch(`${API_BASE}/conversions/upload`, {
     method: 'POST',
-    headers: {
-      Authorization: `Bearer ${token}`,
-    },
+    headers,
     body: formData,
   });
+
+  // Handle session expiration if token was supplied
+  if (res.status === 401 && token) {
+    // Check if it was a PDF password issue rather than an expired session
+    let peekData: any = null;
+    try {
+      peekData = await res.clone().json();
+    } catch {}
+    const isPdfPasswordIssue =
+      peekData?.code === 'ERR_PDF_PASSWORD_REQUIRED' ||
+      peekData?.code === 'ERR_INVALID_PASSWORD' ||
+      peekData?.code === 'ERR_PDF_ENCRYPTED' ||
+      (peekData?.message && /password|encrypt/i.test(peekData.message));
+
+    if (!isPdfPasswordIssue) {
+      const refreshedToken = await refreshSessionToken();
+      if (refreshedToken) {
+        headers['Authorization'] = `Bearer ${refreshedToken}`;
+        res = await fetch(`${API_BASE}/conversions/upload`, {
+          method: 'POST',
+          headers,
+          body: formData,
+        });
+      }
+    }
+  }
 
   if (!res.ok) {
     let err: any = {};
@@ -709,6 +801,8 @@ export async function uploadStatementPdf(
 
   return res.json();
 }
+
+export const uploadStatementFile = uploadStatementPdf;
 
 export async function unlockPdfFile(file: File, password: string): Promise<Blob> {
   const formData = new FormData();
@@ -816,6 +910,53 @@ export async function bulkAssignLedgers(
   });
 }
 
+export async function getConversionReversals(jobId: string): Promise<{
+  job_id: string;
+  ledger_name: string;
+  parent_group: string;
+  will_auto_create_ledger: boolean;
+  pairs_count: number;
+  unmatched_count: number;
+  total_reverse_rows: number;
+  net_total: number;
+  pairs: Array<{
+    pair_id: string;
+    reason: string;
+    amount: number;
+    debit_row: any;
+    credit_row: any;
+    net: number;
+  }>;
+  unmatched: Array<any>;
+  linked_charges: Array<any>;
+}> {
+  return apiFetch(`/conversions/${jobId}/reversals`);
+}
+
+export async function pairReversalRows(
+  jobId: string,
+  rowIndex1: number,
+  rowIndex2: number,
+  reason?: string
+): Promise<ConversionJobSummary> {
+  return apiFetch<ConversionJobSummary>(`/conversions/${jobId}/reversals/pair`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ row_index_1: rowIndex1, row_index_2: rowIndex2, reason })
+  });
+}
+
+export async function unpairReversalRow(
+  jobId: string,
+  rowIndex: number
+): Promise<ConversionJobSummary> {
+  return apiFetch<ConversionJobSummary>(`/conversions/${jobId}/reversals/unpair`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ row_index: rowIndex })
+  });
+}
+
 export async function generateXml(
   jobId: string,
   bankLedgerName?: string,
@@ -851,8 +992,14 @@ export async function downloadFileBlob(downloadUrl: string, filename: string): P
   const token = getAuthToken();
   let fullUrl = downloadUrl;
   if (!fullUrl.startsWith('http://') && !fullUrl.startsWith('https://')) {
-    const base = API_BASE.replace(/\/api$/, '');
-    fullUrl = `${base}${downloadUrl.startsWith('/') ? '' : '/'}${downloadUrl}`;
+    if (downloadUrl.startsWith('/api/') || downloadUrl.startsWith('api/')) {
+      const base = API_BASE.replace(/\/api\/?$/, '');
+      const path = downloadUrl.startsWith('/') ? downloadUrl : `/${downloadUrl}`;
+      fullUrl = `${base}${path}`;
+    } else {
+      const cleanPath = downloadUrl.startsWith('/') ? downloadUrl : `/${downloadUrl}`;
+      fullUrl = `${API_BASE.replace(/\/$/, '')}${cleanPath}`;
+    }
   }
 
   // Append token to query parameter for maximum browser compatibility
@@ -1615,6 +1762,104 @@ export async function getMyPaymentRequests(): Promise<PaymentRequest[]> {
     return [];
   }
 }
+
+// ---------------------------------------------------------------------------
+// Subscription Plans & Checkout API (PRD Requirements)
+// ---------------------------------------------------------------------------
+
+export interface SubscriptionPlanItem {
+  id: string;
+  name: string;
+  tagline: string;
+  price_inr: number;
+  price_paise: number;
+  bills_limit: number;
+  duration_days: number;
+  is_unlimited: boolean;
+  badge?: string;
+  features: string[];
+}
+
+export interface PaymentOrderResponse {
+  orderId: string;
+  order_id?: string;
+  amount: number;
+  amount_paise?: number;
+  currency: string;
+  keyId: string;
+  key_id?: string;
+  planId?: string;
+  plan_id?: string;
+  planName?: string;
+  plan_name?: string;
+  billsLimit?: number;
+  bills_limit?: number;
+  isUnlimited?: boolean;
+  is_unlimited?: boolean;
+}
+
+export interface CreatePaymentOrderPayload {
+  planId?: string;
+  customer_name?: string;
+  customer_email?: string;
+  customer_phone?: string;
+}
+
+export async function getSubscriptionPlans(): Promise<{ success: boolean; plans: SubscriptionPlanItem[] }> {
+  return apiFetch('/subscriptions/plans');
+}
+
+export async function createPaymentOrder(payload?: CreatePaymentOrderPayload): Promise<PaymentOrderResponse> {
+  return apiFetch('/payments/create-order', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload || { planId: 'basic' }),
+  });
+}
+
+export async function verifyPayment(payload: {
+  razorpay_payment_id: string;
+  razorpay_order_id?: string;
+  razorpay_signature?: string;
+  planId?: string;
+  customer_name?: string;
+  customer_email?: string;
+  customer_phone?: string;
+}): Promise<{
+  ok: boolean;
+  success: boolean;
+  message: string;
+  plan_id?: string;
+  plan_name?: string;
+  bills_limit?: number;
+  is_unlimited?: boolean;
+  membership_expires_at?: string;
+  last_valid_day?: string;
+  display_wording?: string;
+  payment_id?: string;
+}> {
+  return apiFetch('/payments/verify', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function getMySubscription(): Promise<{
+  success: boolean;
+  is_active: boolean;
+  plan_id: string;
+  plan_name: string;
+  bills_limit: number;
+  is_unlimited: boolean;
+  bills_converted_this_cycle: number;
+  bills_remaining_this_cycle: any;
+  membership_expires_at?: string;
+  last_valid_day?: string;
+}> {
+  return apiFetch('/subscriptions/me');
+}
+
 
 
 

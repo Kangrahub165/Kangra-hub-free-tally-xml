@@ -76,3 +76,30 @@ def setup_test_auth_override():
         app.dependency_overrides[get_current_user] = original_override
     else:
         app.dependency_overrides.pop(get_current_user, None)
+
+@pytest.fixture(autouse=True)
+def disable_external_gemini_in_tests(monkeypatch):
+    """Disable live external Gemini network calls during unit test suite to test deterministic pathways."""
+    from app.core.config import settings
+    monkeypatch.setattr(settings, "gemini_enabled", False)
+
+@pytest.fixture(autouse=True)
+def reset_test_user_daily_quota():
+    """Ensure test users start with fresh quota and clean state so tests are isolated."""
+    from app.api.usage import _IN_MEMORY_DAILY_USAGE, USER_ADDITIONAL_PAGES, get_kolkata_today
+    from app.api.conversions import IN_MEMORY_JOBS
+    from app.core import db
+    today = get_kolkata_today()
+    IN_MEMORY_JOBS.clear()
+    for uid in ["test-user-id", "user@example.com", "test-user-limit"]:
+        _IN_MEMORY_DAILY_USAGE[f"{uid}:{today}"] = 0
+        db.reset_daily_usage(uid, today)
+        db.set_additional_pages(uid, 0)
+        USER_ADDITIONAL_PAGES[uid] = 0
+    yield
+    IN_MEMORY_JOBS.clear()
+    for uid in ["test-user-id", "user@example.com", "test-user-limit"]:
+        _IN_MEMORY_DAILY_USAGE[f"{uid}:{today}"] = 0
+        db.reset_daily_usage(uid, today)
+        db.set_additional_pages(uid, 0)
+        USER_ADDITIONAL_PAGES[uid] = 0

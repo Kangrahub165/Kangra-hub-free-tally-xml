@@ -9,6 +9,9 @@ export interface UserSession {
   email: string;
   role: 'ADMIN' | 'USER';
   fullName?: string;
+  full_name?: string;
+  mobileNumber?: string;
+  mobile_number?: string;
 }
 
 interface AuthContextType {

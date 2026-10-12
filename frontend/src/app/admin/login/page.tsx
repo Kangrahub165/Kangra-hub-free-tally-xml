@@ -87,13 +87,19 @@ function AdminLoginForm() {
                 clearAuthToken();
                 token = null;
               }
-            } catch {
+            } catch (vErr: any) {
               await supabase.auth.signOut();
               clearAuthToken();
               token = null;
+              if (vErr?.status === 403) {
+                throw vErr;
+              }
             }
           }
-        } catch {
+        } catch (sbErr: any) {
+          if (sbErr?.status === 403) {
+            throw sbErr;
+          }
           // Continue to backend fallback
         }
       }
@@ -130,7 +136,9 @@ function AdminLoginForm() {
         router.push(destination);
       }
     } catch (err: any) {
-      setError('Access denied. This login portal is restricted to authorized administrators.');
+      clearAuthToken();
+      const message = err?.message || 'Access denied. This login portal is restricted to authorized administrators.';
+      setError(message);
     } finally {
       setLoading(false);
     }

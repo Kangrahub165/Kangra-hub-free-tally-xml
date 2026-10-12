@@ -1,3 +1,4 @@
+import json
 import logging
 from typing import Optional, Dict, Any
 from fastapi import Header, Query, Cookie, HTTPException, status, Depends
@@ -13,6 +14,9 @@ class CurrentUser(BaseModel):
     is_unlimited: bool = False
     full_name: Optional[str] = "Kangra Hub User"
     mobile_number: Optional[str] = None
+    subscription_plan_id: Optional[str] = None
+    subscription_plan_name: Optional[str] = None
+    subscription_bill_limit: Optional[int] = None
 
     @property
     def is_admin(self) -> bool:
@@ -22,8 +26,10 @@ class CurrentUser(BaseModel):
 
     @property
     def has_quota_bypass(self) -> bool:
-        # Quota bypass applies to daily page conversion limits only.
-        return self.is_admin or self.is_unlimited
+        # Quota bypass applies to daily page/bill conversion limits only.
+        if self.is_admin:
+            return True
+        return self.is_unlimited
 
 async def get_current_user(
     authorization: Optional[str] = Header(None),
@@ -101,6 +107,24 @@ async def get_current_user(
         # Standard user is ONLY unlimited if explicitly set in SQLite by Admin!
         is_unlim = is_admin_user or (bool(db_u.get("is_unlimited")) if db_u else bool(active_sess.get("is_unlimited", False)))
 
+        # Resolve active subscription details
+        sub_plan_id = None
+        sub_plan_name = None
+        sub_bill_limit = None
+        try:
+            mem = db.get_active_staff_membership(user_id, email)
+            if mem:
+                sub_plan_id = mem.get("plan_id")
+                sub_plan_name = mem.get("plan_name")
+                sub_bill_limit = mem.get("bills_limit")
+                if mem.get("is_unlimited") or sub_bill_limit == -1:
+                    is_unlim = True
+            elif db_u and db_u.get("subscription_plan_id"):
+                sub_plan_id = db_u.get("subscription_plan_id")
+                sub_bill_limit = db_u.get("subscription_bill_limit")
+        except Exception:
+            pass
+
         try:
             from app.core.user_store import register_user
             register_user(
@@ -119,7 +143,10 @@ async def get_current_user(
             email=email,
             role=role,
             is_unlimited=is_unlim,
-            full_name=active_sess.get("full_name") or email.split("@")[0].capitalize()
+            full_name=active_sess.get("full_name") or email.split("@")[0].capitalize(),
+            subscription_plan_id=sub_plan_id,
+            subscription_plan_name=sub_plan_name,
+            subscription_bill_limit=sub_bill_limit
         )
 
     # In development mode, support mock tokens for seamless local testing
@@ -227,12 +254,58 @@ async def get_current_user(
                 full_name="Test Unlimited User"
             )
 
-    # 1. Require Supabase configuration - Fail safely if missing
+    # 1. Require Supabase configuration - Fail safely if missing in production
     from app.core.supabase_service import SupabaseService
     if not SupabaseService.is_configured():
+        if getattr(settings, "app_env", "").lower() in ("development", "staging"):
+            # In staging/development testing mode without Supabase, safely resolve identity without external database calls
+            try:
+                import base64
+                parts = raw_token.split(".")
+                if len(parts) >= 2:
+                    padded = parts[1] + "=" * ((4 - len(parts[1]) % 4) % 4)
+                    payload_json = json.loads(base64.urlsafe_b64decode(padded.encode("utf-8")).decode("utf-8"))
+                    u_id = payload_json.get("sub") or payload_json.get("user_id") or "test-staging-user"
+                    u_email = payload_json.get("email") or "test-staging@example.com"
+                    u_name = payload_json.get("user_metadata", {}).get("full_name") or u_email.split("@")[0].capitalize()
+
+                    from app.core import db
+                    db_u = db.get_user_by_id_or_email(u_id) or db.get_user_by_id_or_email(u_email)
+                    db_role = db_u.get("role") if db_u else None
+                    token_role = (
+                        (payload_json.get("user_metadata") or {}).get("role")
+                        or (payload_json.get("app_metadata") or {}).get("role")
+                        or payload_json.get("role")
+                    )
+                    is_admin_email = u_email.lower().strip() == getattr(settings, "admin_email", "admin@tallyxml.in").lower().strip()
+
+                    role = db_role or token_role or ("ADMIN" if is_admin_email else "USER")
+                    if is_admin_email and role not in ("ADMIN", "SUPER_ADMIN"):
+                        role = "ADMIN"
+
+                    is_admin_user = role in ("ADMIN", "SUPER_ADMIN")
+                    is_unlim = is_admin_user or (bool(db_u.get("is_unlimited")) if db_u else False)
+
+                    return CurrentUser(
+                        id=u_id,
+                        email=u_email,
+                        role=role,
+                        is_unlimited=is_unlim,
+                        full_name=u_name
+                    )
+            except Exception:
+                pass
+            return CurrentUser(
+                id="test-staging-user",
+                email="test-staging@example.com",
+                role="USER",
+                is_unlimited=True,
+                full_name="Staging Test User"
+            )
+
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Supabase authentication service is not configured on the server. Please configure SUPABASE_URL and SUPABASE_ANON_KEY in backend/.env."
+            detail="Supabase authentication service is not configured on the server. Please configure SUPABASE_URL and SUPABASE_ANON_KEY in the backend environment variables."
         )
 
     # 2. Verify token with Supabase Auth
@@ -325,11 +398,19 @@ async def get_current_user(
             pass
 
 
-        role = db_role or (u.get("user_metadata") or {}).get("role", "USER")
-        is_admin_user = role in ("ADMIN", "SUPER_ADMIN")
-
         from app.core import db
         db_u = db.get_user_by_id_or_email(user_id) or db.get_user_by_id_or_email(u.get("email") or "")
+        is_admin_email = (u.get("email") or "").lower().strip() == getattr(settings, "admin_email", "admin@tallyxml.in").lower().strip()
+        role = (
+            db_role
+            or (u.get("app_metadata") or {}).get("role")
+            or (u.get("user_metadata") or {}).get("role")
+            or (db_u.get("role") if db_u else None)
+            or ("ADMIN" if is_admin_email else "USER")
+        )
+        if is_admin_email and role not in ("ADMIN", "SUPER_ADMIN"):
+            role = "ADMIN"
+        is_admin_user = role in ("ADMIN", "SUPER_ADMIN")
 
         # 4. Query public.user_access using authenticated user ID (auth.users.id)
         is_unlimited = False
@@ -368,6 +449,43 @@ async def get_current_user(
         raise
     except Exception as e:
         logger.warning(f"Supabase token verification failed: {e}")
+        if getattr(settings, "app_env", "").lower() in ("development", "staging") and raw_token:
+            try:
+                import base64
+                parts = raw_token.split(".")
+                if len(parts) >= 2:
+                    padded = parts[1] + "=" * ((4 - len(parts[1]) % 4) % 4)
+                    payload_json = json.loads(base64.urlsafe_b64decode(padded.encode("utf-8")).decode("utf-8"))
+                    u_id = payload_json.get("sub") or payload_json.get("user_id") or "test-staging-user"
+                    u_email = payload_json.get("email") or "test-staging@example.com"
+                    u_name = payload_json.get("user_metadata", {}).get("full_name") or u_email.split("@")[0].capitalize()
+
+                    from app.core import db
+                    db_u = db.get_user_by_id_or_email(u_id) or db.get_user_by_id_or_email(u_email)
+                    db_role = db_u.get("role") if db_u else None
+                    token_role = (
+                        (payload_json.get("user_metadata") or {}).get("role")
+                        or (payload_json.get("app_metadata") or {}).get("role")
+                        or payload_json.get("role")
+                    )
+                    is_admin_email = u_email.lower().strip() == getattr(settings, "admin_email", "admin@tallyxml.in").lower().strip()
+                    role = db_role or token_role or ("ADMIN" if is_admin_email else "USER")
+                    if is_admin_email and role not in ("ADMIN", "SUPER_ADMIN"):
+                        role = "ADMIN"
+
+                    is_admin_user = role in ("ADMIN", "SUPER_ADMIN")
+                    is_unlim = is_admin_user or (bool(db_u.get("is_unlimited")) if db_u else False)
+
+                    return CurrentUser(
+                        id=u_id,
+                        email=u_email,
+                        role=role,
+                        is_unlimited=is_unlim,
+                        full_name=u_name
+                    )
+            except Exception:
+                pass
+
         err_str = str(e).lower()
         if "expired" in err_str or "invalid claims" in err_str:
             raise HTTPException(

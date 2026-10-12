@@ -93,10 +93,19 @@ export default function HomePage() {
           </p>
 
           {/* CTA Group */}
-          <div className="mt-10 flex flex-col sm:flex-row items-center justify-center gap-3.5 max-w-md mx-auto">
+          <div className="mt-10 flex flex-col sm:flex-row items-center justify-center gap-3.5 max-w-lg mx-auto">
             <Link href="/convert" className="w-full sm:w-auto">
               <Button variant="primary" size="lg" className="w-full sm:w-auto bg-brand-500 hover:bg-brand-400 shadow-glow-brand border-brand-400/20 text-white font-bold" iconRight={<ArrowRight className="w-4 h-4" />}>
                 Start Free Conversion
+              </Button>
+            </Link>
+            <Link href="/plans" className="w-full sm:w-auto">
+              <Button
+                variant="outline-dark"
+                size="lg"
+                className="w-full sm:w-auto bg-white/10 border-brand-400/30 text-white hover:bg-white/20 hover:border-brand-400/50 font-bold"
+              >
+                View Plans
               </Button>
             </Link>
             <Link href="/supported-banks" className="w-full sm:w-auto">
